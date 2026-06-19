@@ -100,6 +100,52 @@ likely have this.)
 2. Download the installer (`msys2-x86_64-*.exe`) and run it.
 3. Accept the default install location: **`C:\msys64`**. Click through to finish.
 
+> If you let `tmequant_server.bat` install MSYS2 for you, it **asks first** —
+> `[I]` install to the default, `[M]` install it yourself anywhere, or `[Q]` quit.
+> It does **not** silently write to `C:`.
+
+### 1b-2. Installing MSYS2 somewhere other than `C:\msys64`
+
+Use this if you **can't write to `C:`** (locked-down/managed machine), or simply
+prefer another drive. **The only thing that has to change is one setting,
+`MSYS2_ROOT`** — nothing inside the MSYS2 shell (the `setup_*`/`start_*`/`*.sh`
+scripts and the Python server) depends on where MSYS2 lives; they work relative to
+the repo. So adapting to a custom location is just:
+
+1. **Install MSYS2 to a folder you can write to.** Run the installer from
+   https://www.msys2.org and pick your folder (e.g. `D:\msys64`, or a folder under
+   your user profile). A user-writable folder needs **no admin rights**. *(With
+   `tmequant_server.bat`, choose `[M]` for this — `winget`'s `--location` is
+   unreliable for the MSYS2 package, so the GUI installer's folder picker is the
+   dependable way to land on a non-`C:` drive.)*
+2. **Point everything at it by setting `MSYS2_ROOT` permanently.** Open *Command
+   Prompt* and run (using your actual path):
+   ```
+   setx MSYS2_ROOT "D:\msys64"
+   ```
+   `setx` makes it a **persistent user environment variable**. **Then fully restart
+   QuPath** (and close any Command Prompt you'll launch the `.bat` from) — programs
+   only read environment variables when they start.
+   - **Why the restart matters for QuPath:** when QuPath auto-launches the server, it
+     runs `tmequant_server.bat` as a child process that **inherits QuPath's
+     environment**. If `MSYS2_ROOT` was set with `setx` *before* QuPath started,
+     QuPath (and the `.bat` it spawns) will use your custom path. A one-off
+     `set MSYS2_ROOT=...` in a single Command Prompt only affects that window, **not**
+     QuPath's auto-launch.
+   - **Alternative (no env var):** edit `tmequant_server.bat` and change the line
+     `set "MSYS2_ROOT=C:\msys64"` to your path. This is bulletproof but you must
+     re-apply it if you re-download the server zip.
+3. **Other references to `C:\msys64`** in this guide (the manual diagnostic commands,
+   and the `DLL load failed` PATH tip in Troubleshooting) are examples — substitute
+   your folder (e.g. `D:\msys64\ucrt64\bin`).
+
+**If the install location is blocked *during* the `.bat` run** (no write permission,
+or a UAC/admin prompt you can't approve for `C:\`): `winget` fails and the batch does
+**not** crash — it reports that MSYS2 still isn't where expected and tells you to set
+`MSYS2_ROOT` and re-run, or to choose `[M]`. The fix is the same as above: re-run,
+pick `[M]`, and install MSYS2 into a folder you own (no `C:` write, no admin needed),
+then `setx MSYS2_ROOT` to it and restart QuPath.
+
 ### 1c. Open the "MSYS2 UCRT64" terminal
 1. Click the Windows **Start** button.
 2. Type `MSYS2 UCRT64`.

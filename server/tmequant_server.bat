@@ -91,9 +91,14 @@ if exist "%MSYS2_ROOT%\msys2_shell.cmd" goto :msys2_ok
 if exist "C:\msys64\msys2_shell.cmd" set "MSYS2_ROOT=C:\msys64"
 if exist "%MSYS2_ROOT%\msys2_shell.cmd" goto :msys2_ok
 echo.
-echo winget finished but MSYS2 still isn't where expected. If it installed to a
-echo different folder, set MSYS2_ROOT to it and re-run, e.g.:
-echo     set "MSYS2_ROOT=D:\msys64"    then    tmequant_server.bat
+echo winget did not install MSYS2 where expected. Common causes:
+echo   - no permission to write to "%MSYS2_ROOT%" (e.g. C: is locked down), or
+echo   - winget ignored the custom location, or needed admin you could not grant.
+echo.
+echo What to do: re-run this file and choose [M] to install MSYS2 yourself into a
+echo folder you OWN (no admin / no C: write needed). Then make it permanent:
+echo     setx MSYS2_ROOT "D:\msys64"     (use your folder)
+echo and RESTART QuPath so its auto-launch picks up the new location.
 echo.
 pause
 exit /b 1
