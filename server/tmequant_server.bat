@@ -3,7 +3,8 @@ rem ===========================================================================
 rem  tmequant_server.bat -- ONE smart installer + launcher for the TME Quant
 rem  FIRE socket server. This is the single file QuPath points at (and that you
 rem  can double-click). It:
-rem    1. Finds MSYS2 -- installs it via winget if missing (browser fallback).
+rem    1. Finds MSYS2 -- and if it's missing, ASKS before installing (you can
+rem       install it yourself to any drive, or set MSYS2_ROOT).
 rem    2. On first run, does the one-time setup (system update + setup_fire_server.sh)
 rem       and writes a .tmequant_setup_ok marker so later runs skip straight to launch.
 rem    3. Starts the server in the MSYS2 UCRT64 console (shows the ~30-40 s load
@@ -17,7 +18,8 @@ rem  It must live in ...\CTFireTest\fiber_socket_bridge\ (next to the .sh script
 rem  and tmequant_boot.sh), with ..\tme-quant alongside. It finds everything
 rem  relative to itself, so you can move the CTFireTest folder anywhere.
 rem
-rem  If MSYS2 is not at C:\msys64, set MSYS2_ROOT (env var) before running.
+rem  MSYS2 location: defaults to C:\msys64. To use another drive/folder, set
+rem  MSYS2_ROOT before running, e.g.  set "MSYS2_ROOT=D:\msys64"
 rem ===========================================================================
 
 setlocal enableextensions
@@ -50,34 +52,75 @@ if not exist "%HERE%..\tme-quant" (
 )
 
 rem ===========================================================================
-rem  Step 1: ensure MSYS2 is installed
+rem  Step 1: ensure MSYS2 is installed. We ASK before installing -- it is a
+rem  large download and the default C:\msys64 may not be writable for everyone.
 rem ===========================================================================
-if not exist "%MSYS2_ROOT%\msys2_shell.cmd" (
-    echo MSYS2 not found at "%MSYS2_ROOT%". Trying to install it with winget...
-    where winget >nul 2>nul
-    if errorlevel 1 (
-        echo.
-        echo winget is not available on this machine. Opening the MSYS2 download
-        echo page in your browser -- install MSYS2 ^(accept the defaults so it
-        echo lands in C:\msys64^), then re-run this file.
-        echo.
-        start "" "https://www.msys2.org/"
-        pause
-        exit /b 1
-    )
-    winget install --id MSYS2.MSYS2 -e --accept-package-agreements --accept-source-agreements
-    if not exist "%MSYS2_ROOT%\msys2_shell.cmd" (
-        echo.
-        echo winget finished but MSYS2 is still not at "%MSYS2_ROOT%".
-        echo If it installed elsewhere, set MSYS2_ROOT to that folder and re-run,
-        echo e.g.:   set "MSYS2_ROOT=D:\msys64"
-        echo Opening the MSYS2 download page as a fallback...
-        start "" "https://www.msys2.org/"
-        pause
-        exit /b 1
-    )
-    echo MSYS2 installed at "%MSYS2_ROOT%".
+if exist "%MSYS2_ROOT%\msys2_shell.cmd" goto :have_msys2
+
+echo.
+echo MSYS2 (the Unix toolchain the FIRE engine needs) was not found at:
+echo     "%MSYS2_ROOT%"
+echo.
+echo   [I] Install it now with winget, to "%MSYS2_ROOT%"
+echo   [M] I'll install MSYS2 myself  (opens msys2.org; the installer lets you
+echo       pick ANY drive/folder -- choose this if you can't write to C:\msys64)
+echo   [Q] Quit, do nothing
+echo.
+echo   Tip: to install to a different drive with [I], quit, then run e.g.
+echo        set "MSYS2_ROOT=D:\msys64"   and re-run this file. (winget may still
+echo        ignore a custom location for MSYS2; [M] is the reliable way.)
+echo.
+choice /c IMQ /n /m "Choose I, M, or Q: "
+if errorlevel 3 goto :user_cancel
+if errorlevel 2 goto :install_manual
+
+rem --- [I] install with winget ----------------------------------------------
+where winget >nul 2>nul
+if errorlevel 1 (
+    echo.
+    echo winget is not available on this machine, so it can't auto-install.
+    goto :install_manual
 )
+echo.
+echo Installing MSYS2 via winget (target: "%MSYS2_ROOT%")...
+winget install --id MSYS2.MSYS2 -e --accept-package-agreements --accept-source-agreements --location "%MSYS2_ROOT%"
+if exist "%MSYS2_ROOT%\msys2_shell.cmd" goto :msys2_ok
+rem winget often ignores --location for MSYS2; retry to its default and detect it.
+winget install --id MSYS2.MSYS2 -e --accept-package-agreements --accept-source-agreements
+if exist "%MSYS2_ROOT%\msys2_shell.cmd" goto :msys2_ok
+if exist "C:\msys64\msys2_shell.cmd" set "MSYS2_ROOT=C:\msys64"
+if exist "%MSYS2_ROOT%\msys2_shell.cmd" goto :msys2_ok
+echo.
+echo winget finished but MSYS2 still isn't where expected. If it installed to a
+echo different folder, set MSYS2_ROOT to it and re-run, e.g.:
+echo     set "MSYS2_ROOT=D:\msys64"    then    tmequant_server.bat
+echo.
+pause
+exit /b 1
+
+:msys2_ok
+echo MSYS2 installed at "%MSYS2_ROOT%".
+goto :have_msys2
+
+:install_manual
+echo.
+echo Opening https://www.msys2.org/ -- run the installer and pick any folder you
+echo like (e.g. D:\msys64). When it finishes:
+echo   - if you installed to C:\msys64, just re-run this file;
+echo   - otherwise set MSYS2_ROOT to your folder first, e.g.
+echo         set "MSYS2_ROOT=D:\msys64"    then    tmequant_server.bat
+echo.
+start "" "https://www.msys2.org/"
+pause
+exit /b 1
+
+:user_cancel
+echo.
+echo Cancelled -- nothing was installed.
+pause
+exit /b 1
+
+:have_msys2
 
 echo.
 if exist "%HERE%.tmequant_setup_ok" (

@@ -34,7 +34,10 @@ The fastest path from zero to a working install:
    - extract the server zip to `C:\CTFireTest\fiber_socket_bridge\`
    - extract the pipeline to `C:\CTFireTest\tme-quant\` (note the hyphen — it must sit *next to*
      `fiber_socket_bridge`).
-4. **Double-click** `fiber_socket_bridge\tmequant_server.bat`.
+4. **Double-click** `fiber_socket_bridge\tmequant_server.bat`. If MSYS2 isn't installed it
+   **asks first** — `[I]`nstall to the default `C:\msys64`, `[M]` install it yourself to any
+   drive (choose this if you can't write to `C:`), or `[Q]`uit. To use another drive with `[I]`,
+   set `MSYS2_ROOT` first (e.g. `set "MSYS2_ROOT=D:\msys64"`) and re-run.
    > ⏱️ **The first run takes a while — this is normal.** It installs MSYS2 and downloads
    > **several hundred MB** of packages, then builds the FIRE engine: **expect ~5–15 minutes**
    > (longer on a slow network). It is **not** frozen — leave the window open until you see
@@ -98,7 +101,9 @@ CTFireTest\
 
 Then **double-click `fiber_socket_bridge\tmequant_server.bat`**. On first run it:
 
-1. Installs **MSYS2** if it's missing (via `winget`, or opens the download page as a fallback),
+1. If **MSYS2** is missing it **asks before installing** — install to the default `C:\msys64`
+   via `winget`, install it yourself to any drive (the MSYS2 installer lets you pick a folder),
+   or quit. Set `MSYS2_ROOT` beforehand to target a different drive,
 2. runs the one-time setup (system update + `setup_fire_server.sh`: dependencies, virtual env,
    and validates/builds the FIRE backend), guarded by a `.tmequant_setup_ok` marker, then
 3. starts the server. You'll see `Fiber socket server listening on 127.0.0.1:5101 (backend=real)`.
