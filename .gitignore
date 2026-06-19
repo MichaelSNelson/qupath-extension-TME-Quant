@@ -1,0 +1,58 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+venv/
+.venv/
+.pytest_cache/
+*.pth
+
+# Windows Zone.Identifier files
+*:Zone.Identifier
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large binary archives
+*.zip
+
+# Codemap (generated)
+codemap/
+
+# Claude Code session scope
+CLAUDE.md
+
+# Never commit the compiled FIRE backend or Python environments
+*.pyd
+*.so
+venv*/
+.venv*/
+.tmequant_setup_ok
+roundtrip_overlay.png
+
+# The FIRE pipeline is obtained separately and must NOT be committed here
+tme-quant/
+server/tme-quant/
+
+# Local image data
+*.tif
+*.tiff
+*.ndpi
+*.svs

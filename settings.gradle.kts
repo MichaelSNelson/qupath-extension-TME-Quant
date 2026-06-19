@@ -1,0 +1,21 @@
+pluginManagement {
+    repositories {
+        mavenLocal()
+        gradlePluginPortal()
+        maven {
+            url = uri("https://maven.scijava.org/content/repositories/releases")
+        }
+    }
+}
+
+rootProject.name = "qupath-extension-tme-quant"
+
+// Specify which version of QuPath the extension is targeting
+qupath {
+    version = "0.7.0"
+}
+
+// Apply QuPath Gradle settings plugin to handle configuration
+plugins {
+    id("io.github.qupath.qupath-extension-settings") version "0.2.1"
+}
