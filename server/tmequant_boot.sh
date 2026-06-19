@@ -21,7 +21,11 @@ pause_close() {
 }
 
 if [ ! -f .tmequant_setup_ok ]; then
-    echo "=== First-time setup (slow: system update + dependencies) ==="
+    echo "==================================================================="
+    echo " First-time setup: downloading packages + building the FIRE engine."
+    echo " This can take 5-15 minutes (longer on a slow network). It is NOT"
+    echo " frozen -- please wait and do NOT close this window."
+    echo "==================================================================="
     # First MSYS2 update may need two passes; don't abort the whole boot if a
     # pass is partial -- setup_fire_server.sh reports the real problems.
     pacman -Syu --noconfirm || true

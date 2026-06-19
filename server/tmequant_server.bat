@@ -83,8 +83,13 @@ echo.
 if exist "%HERE%.tmequant_setup_ok" (
     echo Launching TME Quant FIRE server in MSYS2 UCRT64 ^(port %PORT%^)...
 ) else (
-    echo First run detected -- doing one-time setup, then launching.
-    echo This can take several minutes ^(downloads + building^). Please wait.
+    echo First run detected -- ONE-TIME setup, then it launches.
+    echo.
+    echo   *** This downloads several HUNDRED MB of packages and builds the
+    echo   *** FIRE engine, so expect 5-15 minutes -- longer on a slow network.
+    echo   *** It is NOT frozen. Leave this window OPEN until you see:
+    echo   ***     Fiber socket server listening on 127.0.0.1:5101
+    echo.
 )
 echo MSYS2 : %MSYS2_ROOT%
 echo Folder: %HERE%

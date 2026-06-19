@@ -8,11 +8,16 @@ to a tumour boundary.
 
 The fiber math runs in a small **Python server** (the *FIRE backend*, built on CT-FIRE). This
 extension is the QuPath-side client + UI; it does **not** bundle the backend (see
-[Architecture](#architecture) and [Acknowledgements](#acknowledgements)).
+[Architecture](#architecture) and [Acknowledgements](#acknowledgements-and-citations)).
 
 - 📖 **Settings reference:** [docs/COLLAGEN_SETTINGS.md](docs/COLLAGEN_SETTINGS.md) — every
   control, what it does, units, defaults, and tuning recipes.
 - 🛠️ **Developer parameter detail:** [docs/PARAMETERS.md](docs/PARAMETERS.md).
+
+> **New here?** Start with **Test it today** just below. The fuller, step-by-step instructions
+> are in the collapsible sections under it (click a heading's ▸ to expand), and the complete
+> walkthrough — including the manual fallback for every step — is in
+> [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
 
 ---
 
@@ -27,31 +32,44 @@ The fastest path from zero to a working install:
    redistributed here — see [Acknowledgements](#acknowledgements-and-citations)).
 3. **Lay out a folder** (anywhere), e.g. `C:\CTFireTest`:
    - extract the server zip to `C:\CTFireTest\fiber_socket_bridge\`
-   - extract the pipeline to `C:\CTFireTest\tme-quant\`
-4. **Double-click** `fiber_socket_bridge\tmequant_server.bat`. First run installs MSYS2 + sets
-   everything up, then prints `…listening on 127.0.0.1:5101 (backend=real)`. Leave it open.
+   - extract the pipeline to `C:\CTFireTest\tme-quant\` (note the hyphen — it must sit *next to*
+     `fiber_socket_bridge`).
+4. **Double-click** `fiber_socket_bridge\tmequant_server.bat`.
+   > ⏱️ **The first run takes a while — this is normal.** It installs MSYS2 and downloads
+   > **several hundred MB** of packages, then builds the FIRE engine: **expect ~5–15 minutes**
+   > (longer on a slow network). It is **not** frozen — leave the window open until you see
+   > `…listening on 127.0.0.1:5101 (backend=real)`. **Later runs start in seconds.**
 5. **Drag the jar onto QuPath**, restart, then **Extensions ▸ TME Quant ▸ Analyze fibers…**.
    When prompted, point it at `tmequant_server.bat` once — after that QuPath starts the server
    for you.
 
-That's it — open an image, draw a region, and preview. Detailed steps and the manual fallback
-are in [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
+That's it — open an image, draw a region, and preview. **Need more detail on any step?** Expand
+the **Install** and **Use** sections below, or see the full
+[Windows setup guide](server/WINDOWS_SETUP_GUIDE.md).
 
 ---
 
 ## What you need
+
+<details>
+<summary><b>Expand</b></summary>
 
 1. **QuPath 0.7.x** (the extension targets 0.7.0).
 2. **The extension jar** (this repo's release) — installed in QuPath.
 3. **The FIRE server** — a Python environment that runs the fiber pipeline. On Windows this uses
    **MSYS2 UCRT64**; the included `server/tmequant_server.bat` automates the whole setup.
 4. **The TMEQuant FIRE pipeline** (`tme-quant`) — obtained separately (it is **not** redistributed
-   here; see [Acknowledgements](#acknowledgements)). Place it next to the server scripts as
-   described in the setup guide.
+   here; see [Acknowledgements](#acknowledgements-and-citations)). Place it next to the server
+   scripts as described below.
+
+</details>
 
 ---
 
 ## Install
+
+<details>
+<summary><b>Expand — full install steps</b></summary>
 
 ### 0. Get the three pieces first
 
@@ -85,10 +103,9 @@ Then **double-click `fiber_socket_bridge\tmequant_server.bat`**. On first run it
    and validates/builds the FIRE backend), guarded by a `.tmequant_setup_ok` marker, then
 3. starts the server. You'll see `Fiber socket server listening on 127.0.0.1:5101 (backend=real)`.
 
-Leave that console window open while you work. **Later runs skip setup and start immediately.**
-
-> Full step-by-step (including the manual fallback if a step fails):
-> [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
+> ⏱️ **First run downloads several hundred MB and builds the engine — budget ~5–15 minutes**
+> (longer on a slow network). It isn't frozen; leave the window open. Later runs skip setup and
+> start in seconds.
 
 ### 3. Let QuPath start the server for you
 Open **Extensions ▸ TME Quant ▸ Analyze fibers in selected region…**. The first time, if the
@@ -98,9 +115,17 @@ waits for it to be ready. You can change the launcher path any time via
 **Extensions ▸ TME Quant ▸ Configure fiber server launcher…** or in QuPath
 **Preferences ▸ TME Quant** (where you can also turn auto-launch off).
 
+> Full step-by-step (including the manual fallback if a step fails):
+> [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
+
+</details>
+
 ---
 
 ## Use
+
+<details>
+<summary><b>Expand</b></summary>
 
 1. **Open an image** and draw/select an **area annotation** over the tissue you want to analyze.
 2. **Extensions ▸ TME Quant ▸ Analyze fibers in selected region…**
@@ -121,9 +146,40 @@ that sits inside the region.
 A complete walkthrough of every control is in
 **[docs/COLLAGEN_SETTINGS.md](docs/COLLAGEN_SETTINGS.md)**.
 
+</details>
+
+---
+
+## Troubleshooting
+
+<details>
+<summary><b>Expand</b></summary>
+
+- **First run seems stuck** — it isn't; the one-time setup downloads several hundred MB and builds
+  the FIRE engine (~5–15 min). Leave the window open until the "listening" line appears.
+- **"Could not reach fiber server"** — the server window isn't running, or is still loading (the
+  first start takes ~30–40 s while the C++ backend loads). Start `tmequant_server.bat`, wait for
+  the "listening" banner, then retry.
+- **`backend = synthetic`** (from *Ping fiber server*, or a warning when the dialog opens) — the
+  real FIRE backend didn't load, so you're on an OpenCV fallback and the FIRE parameters have no
+  effect. Run `server/diagnose_backend.sh` (then `build_backend.sh` + `setup_fire_server.sh`).
+- **"The syntax of the command is incorrect." / window closes instantly** — make sure you have the
+  latest `tmequant-server-<version>.zip` from Releases (older batch files had this bug).
+- **Setup stops complaining about `tme-quant`** — the FIRE pipeline folder is missing; put it next
+  to `fiber_socket_bridge` as `tme-quant` (with the hyphen).
+- **Fibers look scrambled / all horizontal** — make sure the server is the current build; older
+  backends mis-handled non-square tiles.
+- **Preview is cropped to a small region** — that's the tuning region. Tick **Use whole image** or
+  select a larger annotation (the dialog follows the live selection).
+
+</details>
+
 ---
 
 ## Architecture
+
+<details>
+<summary><b>Expand</b></summary>
 
 ```
 QuPath (this extension)  --TCP socket (127.0.0.1:5101)-->  Python FIRE server  -->  CT-FIRE backend
@@ -134,9 +190,14 @@ QuPath (this extension)  --TCP socket (127.0.0.1:5101)-->  Python FIRE server  -
 The extension only speaks a small socket protocol; all fiber math is delegated to the external
 server. That keeps this repo free of the restricted upstream code.
 
+</details>
+
 ---
 
 ## Building from source
+
+<details>
+<summary><b>Expand</b></summary>
 
 ```bash
 ./gradlew shadowJar
@@ -146,24 +207,14 @@ server. That keeps this repo free of the restricted upstream code.
 Requires a JDK compatible with QuPath 0.7 (Java 21+). The QuPath libraries are provided at
 runtime (not bundled).
 
----
-
-## Troubleshooting
-
-- **"Could not reach fiber server"** — the server window isn't running, or is still loading (the
-  first start takes ~30–40 s while the C++ backend loads). Start `tmequant_server.bat`, wait for
-  the "listening" banner, then retry.
-- **`backend = synthetic`** (from *Ping fiber server*) — the real FIRE backend didn't load, so
-  you're getting an OpenCV fallback and the FIRE parameters have no effect. See the setup guide /
-  `server/diagnose_backend.sh`.
-- **Fibers look scrambled / all horizontal** — make sure the server is the current build; older
-  backends mis-handled non-square tiles.
-- **Preview is cropped to a small region** — that's the tuning region. Tick **Use whole image** or
-  select a larger annotation (the dialog follows the live selection).
+</details>
 
 ---
 
 ## Acknowledgements and citations
+
+<details>
+<summary><b>Expand</b></summary>
 
 This extension is a thin QuPath client. The science it surfaces, and the engineering patterns it
 reuses, come from other projects — please credit them.
@@ -204,6 +255,8 @@ The FIRE pipeline (`tme-quant`), the compiled CT-FIRE backend (`*.pyd`/`*.so`), 
 **CurveLab is restricted to non-commercial/academic use and cannot be redistributed**. Obtain and
 accept those licenses separately. This extension uses the FIRE-only path, which does **not**
 require CurveLab.
+
+</details>
 
 ---
 
