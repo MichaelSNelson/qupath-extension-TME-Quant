@@ -212,6 +212,10 @@ server. That keeps this repo free of the restricted upstream code.
 Requires a JDK compatible with QuPath 0.7 (Java 21+). The QuPath libraries are provided at
 runtime (not bundled).
 
+**Modifying the Windows installer/launcher (`.bat`/`.sh`)?** Read
+[docs/INSTALLER_NOTES.md](docs/INSTALLER_NOTES.md) first — it captures the cmd.exe/MSYS2 quoting
+and line-ending gotchas that are easy to re-introduce.
+
 </details>
 
 ---
