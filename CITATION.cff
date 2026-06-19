@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+message: >-
+  If you use this extension, please cite it together with the underlying
+  methods (CT-FIRE, CurveAlign, QuPath) listed in the README.
+title: "qupath-extension-TME-Quant"
+abstract: >-
+  A QuPath extension for collagen fiber analysis: it drives the TMEQuant FIRE
+  fiber-extraction pipeline over a local socket, with interactive preview,
+  supervised parameter tuning, and TACS classification.
+authors:
+  - family-names: Nelson
+    given-names: Michael S.
+type: software
+license: Apache-2.0
+repository-code: "https://github.com/MichaelSNelson/qupath-extension-TME-Quant"
+keywords:
+  - QuPath
+  - collagen
+  - CT-FIRE
+  - second-harmonic generation
+  - TACS
+  - digital pathology
+references:
+  - type: article
+    title: >-
+      QuPath: Open source software for digital pathology image analysis
+    authors:
+      - family-names: Bankhead
+        given-names: Peter
+    year: 2017
+    journal: Scientific Reports
+    volume: "7"
+    notes: "16878"
+  - type: article
+    title: >-
+      Computational segmentation of collagen fibers from second-harmonic
+      generation images of breast cancer
+    authors:
+      - family-names: Bredfeldt
+        given-names: Jeremy S.
+      - family-names: Eliceiri
+        given-names: Kevin W.
+    year: 2014
+    journal: Journal of Biomedical Optics
+    volume: "19"
+    notes: "1:016007 (CT-FIRE)"

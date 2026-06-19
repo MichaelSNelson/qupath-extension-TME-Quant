@@ -16,6 +16,29 @@ extension is the QuPath-side client + UI; it does **not** bundle the backend (se
 
 ---
 
+## Test it today (Windows)
+
+The fastest path from zero to a working install:
+
+1. **From the [latest release](https://github.com/MichaelSNelson/qupath-extension-TME-Quant/releases/latest)**, download:
+   - `qupath-extension-tme-quant-<version>-all.jar` (the extension), and
+   - `tmequant-server-<version>.zip` (the server scripts).
+2. **Get the FIRE pipeline** `TMEQuant_fire_only.zip` from the maintainer (it can't be
+   redistributed here — see [Acknowledgements](#acknowledgements-and-citations)).
+3. **Lay out a folder** (anywhere), e.g. `C:\CTFireTest`:
+   - extract the server zip to `C:\CTFireTest\fiber_socket_bridge\`
+   - extract the pipeline to `C:\CTFireTest\tme-quant\`
+4. **Double-click** `fiber_socket_bridge\tmequant_server.bat`. First run installs MSYS2 + sets
+   everything up, then prints `…listening on 127.0.0.1:5101 (backend=real)`. Leave it open.
+5. **Drag the jar onto QuPath**, restart, then **Extensions ▸ TME Quant ▸ Analyze fibers…**.
+   When prompted, point it at `tmequant_server.bat` once — after that QuPath starts the server
+   for you.
+
+That's it — open an image, draw a region, and preview. Detailed steps and the manual fallback
+are in [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
+
+---
+
 ## What you need
 
 1. **QuPath 0.7.x** (the extension targets 0.7.0).
@@ -130,22 +153,47 @@ runtime (not bundled).
 
 ---
 
-## Acknowledgements
+## Acknowledgements and citations
 
-This tool is a client for the **TMEQuant / FIRE** collagen pipeline and builds on work from the
-**Laboratory for Optical and Computational Instrumentation (LOCI), University of
-Wisconsin–Madison**. Please cite the underlying methods in any publication:
+This extension is a thin QuPath client. The science it surfaces, and the engineering patterns it
+reuses, come from other projects — please credit them.
 
-- **CT-FIRE / FIRE** — Bredfeldt et al., *Computational segmentation of collagen fibers from
-  second-harmonic generation images of breast carcinoma*, J. Biomed. Opt. 19(1):016007 (2014).
-- **CurveAlign** — Liu et al. (LOCI), collagen fiber quantification and alignment.
-- **TWOMBLI** — Wershof et al., for fiber/matrix morphology context.
+### Methods this builds on (please cite in publications)
 
-The FIRE pipeline (`tme-quant`), the compiled CT-FIRE backend, **CurveLab** (FDCT) and **FFTW**
-are **not** distributed with this extension and carry their own licenses — notably **CurveLab is
-restricted to non-commercial/academic use and cannot be redistributed**; obtain and accept those
-licenses separately if you enable the optional curvelet path. This extension uses the FIRE-only
-path, which does not require CurveLab.
+- **QuPath** — the host application. Bankhead P, Loughrey M B, Fernández J A, et al. (2017).
+  *QuPath: Open source software for digital pathology image analysis.* **Scientific Reports**
+  7:16878.
+- **CT-FIRE / FIRE** — the collagen fiber-extraction algorithm this drives. Bredfeldt J S, Liu Y,
+  Pehlke C A, Conklin M W, Szulczewski J M, Inman D R, Keely P J, Nowak R D, Mackie T R,
+  Eliceiri K W (2014). *Computational segmentation of collagen fibers from second-harmonic
+  generation images of breast cancer.* **Journal of Biomedical Optics** 19(1):016007.
+- **CurveAlign** — collagen fiber quantification/alignment from
+  [LOCI, UW–Madison](https://loci.wisc.edu/software/curvealign/); `tme-quant` is a Python
+  translation of it.
+- **TACS (Tumour-Associated Collagen Signatures)** — the biological basis for the TACS-2/TACS-3
+  classification. Conklin M W, Eickhoff J C, Riching K M, et al. (2011). *Aligned collagen is a
+  prognostic signature for survival in human breast carcinoma.* **Am. J. Pathol.**
+  178(3):1221–1232; Provenzano P P, Inman D R, Eliceiri K W, et al. (2008). *Collagen density
+  promotes mammary tumor initiation and progression.* **BMC Medicine** 6:11.
+- **TWOMBLI** — Wershof E, Park D, Barry D J, et al. (2021). *A FIJI macro for quantifying pattern
+  in extracellular matrix (TWOMBLI).* **Life Science Alliance** 4(3):e202000880 (cited for
+  provenance of the morphometric framing).
+
+### Prior projects this is modeled on
+
+- **TMEQuant / `tme-quant`** — the FIRE collagen pipeline this extension drives over a socket
+  (LOCI/UW–Madison ecosystem). This repo ships only the thin **socket bridge** to it.
+- **QPSC** (`qupath-extension-qpsc` ↔ `microscope_command_server`) — the QuPath-side socket-client
+  architecture here (host/port preferences, the 8-byte command + length-prefixed payload wire
+  protocol, the launch/ping flow) is deliberately modeled on the QPSC microscope-control extension.
+
+### Not redistributed here
+
+The FIRE pipeline (`tme-quant`), the compiled CT-FIRE backend (`*.pyd`/`*.so`), **CurveLab**
+(FDCT) and **FFTW** are **not** included in this repo and carry their own licenses — notably
+**CurveLab is restricted to non-commercial/academic use and cannot be redistributed**. Obtain and
+accept those licenses separately. This extension uses the FIRE-only path, which does **not**
+require CurveLab.
 
 ---
 
