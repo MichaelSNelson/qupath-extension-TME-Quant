@@ -1,0 +1,7 @@
+# Normalise line endings. Shell scripts MUST stay LF (MSYS2 bash); Windows
+# batch/PowerShell MUST be CRLF or cmd.exe misparses them.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
