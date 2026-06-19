@@ -1387,7 +1387,20 @@ def serve(host: str, port: int) -> None:
     shutdown_event = threading.Event()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((host, port))
+        try:
+            s.bind((host, port))
+        except OSError as exc:
+            # Most common cause: another server is already listening on this port.
+            # Don't dump a traceback at the user -- explain it and what to do.
+            logger.error(
+                "Could not bind %s:%d (%s).\n"
+                "  * A TME Quant server is probably ALREADY running on this port --\n"
+                "    look for another console window; if so, just use that one.\n"
+                "  * Otherwise the port is taken by another program. Start this server on a\n"
+                "    different port, e.g.  ./start_fire_server.sh 5102  (and set the same\n"
+                "    port in QuPath Preferences > TME Quant), or stop whatever holds %d.",
+                host, port, exc, port)
+            raise SystemExit(3)
         s.listen()
         s.settimeout(1.0)  # so we can poll shutdown_event
         logger.info("Fiber socket server listening on %s:%d (backend=%s)", host, port, _BACKEND)

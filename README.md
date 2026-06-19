@@ -53,19 +53,29 @@ are in [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
 
 ## Install
 
+### 0. Get the three pieces first
+
+| # | What | Where to get it |
+|---|---|---|
+| A | **Extension jar** (`qupath-extension-tme-quant-<version>-all.jar`) | [Releases](https://github.com/MichaelSNelson/qupath-extension-TME-Quant/releases/latest) |
+| B | **Server scripts** (`tmequant-server-<version>.zip`) | [Releases](https://github.com/MichaelSNelson/qupath-extension-TME-Quant/releases/latest) (or the [`server/`](server/) folder of this repo) |
+| C | **FIRE pipeline** (`tme-quant` / `TMEQuant_fire_only.zip`) | **Obtain from the maintainer** — it is *not* redistributed in this repo (the `tme-quant` package and the compiled CT-FIRE backend carry their own terms; see [Acknowledgements](#acknowledgements-and-citations)). Request it via this repo's [Issues](https://github.com/MichaelSNelson/qupath-extension-TME-Quant/issues) or your TMEQuant/LOCI contact. |
+
+> Item **C** is the one external dependency you can't download from this repo. Get it before
+> starting — the server won't run without it (the setup script checks for it and tells you if
+> it's missing).
+
 ### 1. Install the extension in QuPath
-Download `qupath-extension-tme-quant-<version>-all.jar` from the
-[Releases](https://github.com/MichaelSNelson/qupath-extension-TME-Quant/releases) page and
-**drag it onto the QuPath window** (or copy it into your QuPath *extensions* directory). Restart
-QuPath. You'll get an **Extensions ▸ TME Quant** menu.
+Take the jar (**A**) and **drag it onto the QuPath window** (or copy it into your QuPath
+*extensions* directory). Restart QuPath. You'll get an **Extensions ▸ TME Quant** menu.
 
 ### 2. Set up + start the FIRE server (Windows, one file)
-Lay out a folder so the server scripts and the pipeline sit side by side:
+Lay out a folder so the server scripts (**B**) and the pipeline (**C**) sit side by side:
 
 ```
 CTFireTest\
-  fiber_socket_bridge\   <- the server\ scripts from this repo
-  tme-quant\             <- the FIRE pipeline (obtained separately)
+  fiber_socket_bridge\   <- extract the server scripts zip (B) here
+  tme-quant\             <- extract the FIRE pipeline (C) here
 ```
 
 Then **double-click `fiber_socket_bridge\tmequant_server.bat`**. On first run it:
