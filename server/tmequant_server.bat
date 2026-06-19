@@ -99,11 +99,19 @@ rem    -no-start : don't relaunch via `start`
 rem    -here     : keep the current directory
 rem    -c        : the command to run. cygpath turns the .bat folder into an
 rem                MSYS path so we cd to it regardless of drive letter.
-rem  The bash one-liner: if the marker is absent, run the system update +
-rem  setup_fire_server.sh and (only on success) create the marker; then launch.
+rem  All the setup/launch logic lives in tmequant_boot.sh -- keeping the -c
+rem  string this simple avoids cmd.exe mis-parsing braces/semicolons/parens.
 rem ===========================================================================
+if not exist "%HERE%tmequant_boot.sh" (
+    echo.
+    echo ERROR: tmequant_boot.sh not found next to this .bat
+    echo        ^(expected in "%HERE%"^). Re-extract the server scripts zip.
+    echo.
+    pause
+    exit /b 1
+)
 call "%MSYS2_ROOT%\msys2_shell.cmd" -ucrt64 -defterm -no-start -here -c ^
-  "cd \"$(cygpath -u '%HERE%')\" && { [ -f .tmequant_setup_ok ] || { echo '=== First-time setup (slow: system update + dependencies) ==='; pacman -Syu --noconfirm; pacman -Su --noconfirm; ./setup_fire_server.sh && touch .tmequant_setup_ok; }; } && ./start_fire_server.sh %PORT%"
+  "cd \"$(cygpath -u '%HERE%')\" && ./tmequant_boot.sh %PORT%"
 
 echo.
 echo Server stopped. Press any key to close this window.
