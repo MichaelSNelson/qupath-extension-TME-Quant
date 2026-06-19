@@ -14,7 +14,7 @@ rem    * Double-click this file, OR
 rem    * run it from a terminal:  tmequant_server.bat [port]
 rem
 rem  It must live in ...\CTFireTest\fiber_socket_bridge\ (next to the .sh scripts
-rem  and start_fire_server.sh), with ..\tme-quant alongside. It finds everything
+rem  and tmequant_boot.sh), with ..\tme-quant alongside. It finds everything
 rem  relative to itself, so you can move the CTFireTest folder anywhere.
 rem
 rem  If MSYS2 is not at C:\msys64, set MSYS2_ROOT (env var) before running.
@@ -32,12 +32,11 @@ if "%PORT%"=="" set "PORT=5101"
 rem --- this script's own folder (with trailing backslash) --------------------
 set "HERE=%~dp0"
 
-rem --- the code must be laid out as expected -------------------------------- -
-if not exist "%HERE%start_fire_server.sh" (
+rem --- the code must be laid out as expected ---------------------------------
+if not exist "%HERE%tmequant_boot.sh" (
     echo.
-    echo ERROR: start_fire_server.sh not found next to this .bat
-    echo        ^(expected in "%HERE%"^).
-    echo        Put this file inside your CTFireTest\fiber_socket_bridge folder.
+    echo ERROR: tmequant_boot.sh not found next to this .bat
+    echo        ^(expected in "%HERE%"^). Re-extract the server scripts zip.
     echo.
     pause
     exit /b 1
@@ -46,7 +45,7 @@ if not exist "%HERE%..\tme-quant" (
     echo.
     echo WARNING: ..\tme-quant not found next to fiber_socket_bridge.
     echo          The server needs the tme-quant pipeline folder as a sibling
-    echo          ^(e.g. F:\CTFireTest\tme-quant^). Setup may fail without it.
+    echo          ^(e.g. D:\...\tmequant\tme-quant^). Setup will stop if it is missing.
     echo.
 )
 
@@ -92,26 +91,18 @@ echo Folder: %HERE%
 echo.
 
 rem ===========================================================================
-rem  Step 2 + 3: (first run) setup, then launch -- all inside the UCRT64 shell.
+rem  Step 2 + 3: (first run) setup, then launch -- inside the UCRT64 shell.
 rem    -ucrt64   : select the UCRT64 toolchain (so the compiled .pyd loads)
 rem    -defterm  : use THIS console window (no separate mintty)
 rem    -no-start : don't relaunch via `start`
-rem    -here     : keep the current directory
-rem    -c        : the command to run. cygpath turns the .bat folder into an
-rem                MSYS path so we cd to it regardless of drive letter.
-rem  All the setup/launch logic lives in tmequant_boot.sh -- keeping the -c
-rem  string this simple avoids cmd.exe mis-parsing braces/semicolons/parens.
+rem    -here     : run in the CURRENT directory -- so we cd into this folder
+rem                first (below) and keep the -c string trivially simple.
+rem  Earlier versions passed cd "$(cygpath ...)" inside -c; cmd.exe mis-parses
+rem  the $() / escaped quotes ("The syntax of the command is incorrect."), so we
+rem  avoid that entirely: cd here, then -here lands MSYS2 in the same folder.
 rem ===========================================================================
-if not exist "%HERE%tmequant_boot.sh" (
-    echo.
-    echo ERROR: tmequant_boot.sh not found next to this .bat
-    echo        ^(expected in "%HERE%"^). Re-extract the server scripts zip.
-    echo.
-    pause
-    exit /b 1
-)
-call "%MSYS2_ROOT%\msys2_shell.cmd" -ucrt64 -defterm -no-start -here -c ^
-  "cd \"$(cygpath -u '%HERE%')\" && ./tmequant_boot.sh %PORT%"
+cd /d "%HERE%"
+call "%MSYS2_ROOT%\msys2_shell.cmd" -ucrt64 -defterm -no-start -here -c "./tmequant_boot.sh %PORT%"
 
 echo.
 echo Server stopped. Press any key to close this window.
