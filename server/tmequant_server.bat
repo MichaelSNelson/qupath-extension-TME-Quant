@@ -101,7 +101,8 @@ rem  Earlier versions passed cd "$(cygpath ...)" inside -c; cmd.exe mis-parses
 rem  the $() / escaped quotes ("The syntax of the command is incorrect."), so we
 rem  avoid that entirely: cd here, then -here lands MSYS2 in the same folder.
 rem ===========================================================================
-cd /d "%HERE%"
+cd /d "%~dp0."
+echo Starting MSYS2 UCRT64 environment...
 call "%MSYS2_ROOT%\msys2_shell.cmd" -ucrt64 -defterm -no-start -here -c "./tmequant_boot.sh %PORT%"
 
 echo.
