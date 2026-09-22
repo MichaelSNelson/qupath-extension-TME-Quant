@@ -38,6 +38,9 @@ automatically, and fibers crossing a tile seam are stitched back together.*
 | ![Threshold mask and traced fibers on one tile](docs/images/tile-threshold-and-fibers.jpg) | ![Fibers colored by angle in QuPath's measurement maps](docs/images/measurement-map-angle.jpg) |
 | **Cyan** is the threshold mask — the collagen FIRE is allowed to trace. **Orange** is the traced fiber centerline. Getting the cyan right is most of the work, which is why stage ① of the dialog previews it live. | The same region with QuPath's **Measurement maps** coloring each fiber by **angle**. Every per-fiber measurement is available this way — length, width, straightness, curvature, and the crimp/kink metrics. |
 
+> 🔍 **Click either image to see the fibers.** They are fine lines and do not survive being
+> shrunk to fit this page — the orange traces in particular all but vanish against the cyan mask.
+
 ---
 
 ## Test it today (Windows)
