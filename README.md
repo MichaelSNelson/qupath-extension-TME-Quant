@@ -14,7 +14,7 @@ extension is the QuPath-side client + UI; it does **not** bundle the backend (se
   control, what it does, units, defaults, and tuning recipes.
 - 🛠️ **Developer parameter detail:** [docs/PARAMETERS.md](docs/PARAMETERS.md).
 
-> **New here?** Start with **Test it today** just below. The fuller, step-by-step instructions
+> **New here?** Start with **You can't test it today** just below. The fuller, step-by-step instructions
 > are in the collapsible sections under it (click a heading's ▸ to expand), and the complete
 > walkthrough — including the manual fallback for every step — is in
 > [server/WINDOWS_SETUP_GUIDE.md](server/WINDOWS_SETUP_GUIDE.md).
@@ -43,9 +43,11 @@ automatically, and fibers crossing a tile seam are stitched back together.*
 
 ---
 
-## Test it today (Windows)
+## You can't test it today (Windows)
 
-The fastest path from zero to a working install:
+Not without step 2. The FIRE pipeline can't be redistributed from this repo, so you have to
+request it from the maintainer before any of this will run. **Ask for it first**, then work
+through the rest while you wait — the other pieces are a download and a double-click.
 
 1. **From the [latest release](https://github.com/MichaelSNelson/qupath-extension-TME-Quant/releases/latest)**, download:
    - `qupath-extension-tme-quant-<version>-all.jar` (the extension), and
