@@ -21,6 +21,25 @@ extension is the QuPath-side client + UI; it does **not** bundle the backend (se
 
 ---
 
+## What it looks like
+
+The example below is collagen imaged by polarized-light birefringence, analyzed across a whole
+slide. Each fiber becomes a QuPath object carrying its own measurements, so everything
+downstream — filtering, classification, export, measurement maps — behaves like any other
+QuPath detection.
+
+![Fibers detected across a whole slide](docs/images/whole-slide-overview.jpg)
+
+*A whole slide after a full run. Magenta shows the traced fibers. The run is tiled
+automatically, and fibers crossing a tile seam are stitched back together.*
+
+| Detection on one tile | The same fibers, color-coded |
+|---|---|
+| ![Threshold mask and traced fibers on one tile](docs/images/tile-threshold-and-fibers.jpg) | ![Fibers colored by angle in QuPath's measurement maps](docs/images/measurement-map-angle.jpg) |
+| **Cyan** is the threshold mask — the collagen FIRE is allowed to trace. **Orange** is the traced fiber centerline. Getting the cyan right is most of the work, which is why stage ① of the dialog previews it live. | The same region with QuPath's **Measurement maps** coloring each fiber by **angle**. Every per-fiber measurement is available this way — length, width, straightness, curvature, and the crimp/kink metrics. |
+
+---
+
 ## Test it today (Windows)
 
 The fastest path from zero to a working install:
@@ -160,6 +179,19 @@ A complete walkthrough of every control is in
 <details>
 <summary><b>Expand</b></summary>
 
+- **Every analysis finds 0 fibers (even with good settings / traced ground truth)** — first run
+  **Extensions ▸ TME Quant ▸ Self-test fiber engine…**. It runs FIRE on a built-in test image full
+  of obvious fibers and tells you whether the *engine itself* works:
+  - **"Fiber engine OK ✓"** → the engine is fine; it's a settings/image issue — set the Background
+    threshold so the red mask outlines collagen (not noise), and see
+    [docs/COLLAGEN_SETTINGS.md](docs/COLLAGEN_SETTINGS.md).
+  - **"Fiber engine PROBLEM ✗ … traced 0 fibers"** → the compiled backend loaded (`backend = real`)
+    but doesn't run on this machine — the prebuilt binary doesn't match your libraries. **Fix
+    without a shell:** put `rebuild_backend.bat` + `rebuild_backend.sh` in your
+    `fiber_socket_bridge` folder and **double-click `rebuild_backend.bat`**; when it finishes,
+    restart the server and re-run the self-test. (Manual equivalent, in the MSYS2 UCRT64 shell:
+    `./build_backend.sh` then `./setup_fire_server.sh`.) Note that *Ping fiber server* cannot catch
+    this — it only checks that the backend *loaded*, not that it *traces*.
 - **First run seems stuck** — it isn't; the one-time setup downloads several hundred MB and builds
   the FIRE engine (~5–15 min). Leave the window open until the "listening" line appears.
 - **"Could not reach fiber server"** — the server window isn't running, or is still loading (the
