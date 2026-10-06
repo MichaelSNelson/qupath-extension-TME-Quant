@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.2.3
+
+**The flow tracer is about twice as fast, with bit-identical output.** Profiling one tile put
+66% of the whole trace in `_flow_sample`: the walk reads three fields — coherence and the two
+direction components — at the SAME positions on every step, and was re-deriving the clip, the
+integer conversion, the fractions and all four corner indices separately for each one. Computed
+once per step now, shared, with flat `take()` gathers instead of 2-D fancy indexing (1.51x).
+Then the trajectory buffer: `(max_steps, n, 2)` float32 at 20,000 seeds per batch is a 128 MB
+array, allocated and NaN-filled twice per batch and strided through on every step — the tracer
+was memory-bound, not compute-bound. Batching at 2,000 keeps it to ~13 MB (2.8x on its own).
+Together 2.07x, and the output is unchanged to the last digit: 250 fibres, 11,689 points,
+checksum 13546663.878083 before and after.
+
+**Parallel tiles.** A new "Parallel tiles" setting (Advanced server settings, default 1, so
+nothing changes until you raise it) traces several tiles at once. One number drives both sides:
+the client sends that many tiles concurrently and the server spends it as worker PROCESSES.
+Processes, not threads, because measurement said so — running the tracer in 4 threads was SLOWER
+than serial (0.86x) while its individual building blocks each scale 2.2-2.8x under the same test,
+so the tracer is GIL-bound on its Python-level loops. End to end over the socket, 6 tiles at once
+run 1.90x faster and every response is identical to the serial one. Higher is not always better:
+8 workers measured worse than 6, because what limits the tracer is memory bandwidth rather than
+cores. FIRE is excluded — it keeps its own isolated worker for the compiled backend and its
+crash-and-retry handling.
+
+Worker threads do only the read-and-trace; ordering, counters, the live overlay, the log and the
+ETA all stay in one consuming loop that walks the results in submission order, so the assembled
+fibre list matches a serial run and nothing downstream had to become thread-safe.
+
+**The server was serialising itself.** `_run_file_logging` held its lock across the entire
+analysis, so with run logging on — the default — a second concurrent request waited for the first
+to finish tracing. It is reference counted now, with the lock held only to install and remove the
+handler. Tiles of one run share a log file, so they share one handler.
+
 ## 0.2.2
 
 **A batch run can be stopped, and says what it did.** "Run across project" offered one button,

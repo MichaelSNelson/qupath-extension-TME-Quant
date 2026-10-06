@@ -212,6 +212,7 @@ public final class FiberAnalysisDialog {
     private Spinner<Double> densityCapSpinner;   // density guard foreground cap (%)
     private Spinner<Double> seedCapSpinner;       // seed-count guard
     private Spinner<Double> webCapSpinner;        // giant-connected-web guard (skeleton px)
+    private Spinner<Double> parallelTilesSpinner; // tiles traced at once (client threads + server worker processes)
     private CheckBox antiFlowCheck;               // optional independent anti-flow self-check
     private Spinner<Double> flowParallelSpinner;  // flow tracer: min spacing between parallel fibres
     private Spinner<Double> fireTimeoutSpinner;   // per-tile FIRE timeout (s)
@@ -1191,6 +1192,18 @@ public final class FiberAnalysisDialog {
         densityCapSpinner = spinnerD(1.0, 90.0, 35.0, 1.0);
         seedCapSpinner = spinnerD(500.0, 100000.0, 15000.0, 500.0);
         webCapSpinner = spinnerD(0.0, 2000000.0, 200000.0, 25000.0);
+        parallelTilesSpinner = spinnerD(1.0, 16.0, 1.0, 1.0);
+        parallelTilesSpinner.setTooltip(ttip(
+                "How many tiles to trace AT ONCE. 1 keeps the present behaviour: one tile at a time."
+                + "\n\nHIGHER is faster up to a point and then slower \u2014 the tracer is limited by "
+                + "memory bandwidth, not by cores, so extra workers start starving each other. "
+                + "Measured on a 16-core machine: 2 tiles 1.3x, 4 tiles 1.5x, 6 tiles 1.9x, 8 tiles "
+                + "1.8x. 4-6 is the useful range, and more cores will NOT push it further."
+                + "\n\nApplies to the Flow and Centerline tracers only. FIRE keeps its own isolated "
+                + "worker, because it needs the compiled backend and its crash-and-retry handling."
+                + "\n\nEach extra worker is a separate Python process on the server, so memory use "
+                + "rises with it. Results are unchanged: tiles are independent and are collected in "
+                + "order."));
         antiFlowCheck = new CheckBox("Anti-flow check (adds a per-fibre score)");
         antiFlowCheck.setWrapText(true);
         antiFlowCheck.setTooltip(ttip(
@@ -1274,8 +1287,10 @@ public final class FiberAnalysisDialog {
         srv.addRow(sr++, new Label("Density guard cap (% fg)"), densityCapSpinner);
         srv.addRow(sr++, new Label("Seed-count cap"), seedCapSpinner);
         srv.addRow(sr++, new Label("Connected-web cap (skel px)"), webCapSpinner);
+        srv.addRow(sr++, new Label("Parallel tiles"), parallelTilesSpinner);
         rememberCheck(antiFlowCheck, FiberSocketPreferences.antiFlowProperty());
         rememberSpinner(webCapSpinner, FiberSocketPreferences.webCapProperty());
+        rememberSpinner(parallelTilesSpinner, FiberSocketPreferences.parallelTilesProperty());
         srv.add(antiFlowCheck, 0, sr++, 2, 1);
         srv.addRow(sr++, new Label("Tile timeout (s)"), fireTimeoutSpinner);
         srv.addRow(sr++, new Label("Jump-cut length multiple"), splitJumpMultSpinner);
@@ -2783,6 +2798,10 @@ public final class FiberAnalysisDialog {
             // Flow filter: off_deg=0 disables it server-side; the coherence gate is the safety dial.
             meta.addProperty("flow_off_deg", flowFilterCheck.isSelected() ? 52.0 : 0.0);
             meta.addProperty("flow_coh", flowCohSpinner.getValue());
+            // Tiles traced at once. The server spends this as worker PROCESSES (its tracers are
+            // GIL-bound, so threads there cannot overlap them); the client sends that many tiles
+            // concurrently to keep them fed.
+            meta.addProperty("trace_workers", parallelTiles());
         }
         // Tracer choice (FIRE seed-and-extend vs centerline/medial-axis). Same measurements either way.
         if (tracerCombo != null && TRACER_CENTERLINE.equals(tracerCombo.getValue())) {
@@ -2948,6 +2967,14 @@ public final class FiberAnalysisDialog {
         } catch (RuntimeException ex) {
             return null;
         }
+    }
+
+    /** Tiles to trace at once; 1 means the original one-at-a-time behaviour. */
+    private int parallelTiles() {
+        if (parallelTilesSpinner == null || parallelTilesSpinner.getValue() == null) {
+            return 1;
+        }
+        return Math.max(1, Math.min(16, (int) Math.round(parallelTilesSpinner.getValue())));
     }
 
     private ROI boundaryRoi() {
@@ -5281,6 +5308,31 @@ public final class FiberAnalysisDialog {
         int totalWidDropped = 0;
         double minLenPx = 0;
         long tilesStartMs = System.currentTimeMillis();
+        // PARALLEL TILES. Worker threads do only the expensive, independent part -- read the
+        // region and hand it to the server. Everything else (ordering, counters, the live
+        // overlay, the log, the ETA) stays in the consuming loop below, which walks the futures
+        // in SUBMISSION order. So the assembled fibre list is identical to the serial run, and
+        // nothing downstream has to become thread-safe.
+        final int tileWorkers = Math.min(parallelTiles(), Math.max(1, tiles.size()));
+        java.util.concurrent.ExecutorService tilePool = null;
+        List<java.util.concurrent.Future<FiberSocketClient.AnalyzeResponse>> pending = null;
+        if (tileWorkers > 1) {
+            tilePool = java.util.concurrent.Executors.newFixedThreadPool(tileWorkers, r -> {
+                Thread th = new Thread(r, "tmequant-tile");
+                th.setDaemon(true);
+                return th;
+            });
+            pending = new ArrayList<>(tiles.size());
+            for (int t = 0; t < tiles.size(); t++) {
+                final int ti = t;
+                final Tile tl = tiles.get(t);
+                pending.add(tilePool.submit(
+                        () -> detectTile(client, tl, ti, channel, d, detMeta, backend)));
+            }
+            tilePool.shutdown(); // no more work; queued tasks still run
+            logger.info("Tracing {} tile(s) at a time.", tileWorkers);
+        }
+        try {
         for (int t = 0; t < tiles.size(); t++) {
             String eta = "";
             if (t > 0) {
@@ -5295,10 +5347,16 @@ public final class FiberAnalysisDialog {
             Tile tl = tiles.get(t);
             FiberSocketClient.AnalyzeResponse resp;
             try {
-                resp = detectTile(client, tl, t, channel, d, detMeta, backend);
+                resp = pending != null
+                        ? pending.get(t).get()
+                        : detectTile(client, tl, t, channel, d, detMeta, backend);
             } catch (Exception ex) {
+                // A worker's failure arrives wrapped; report the cause, not the wrapper.
+                Throwable cause = ex instanceof java.util.concurrent.ExecutionException
+                        && ex.getCause() != null ? ex.getCause() : ex;
                 resp = null;
-                logger.warn("  tile {}/{} read/IO error: {}", t + 1, tiles.size(), ex.getMessage());
+                logger.warn("  tile {}/{} read/IO error: {}", t + 1, tiles.size(),
+                        cause.getMessage());
             }
             // RESILIENCE: a single tile failing (e.g. too dense even after the server
             // auto-coarsens seeds, or an IO error) must NOT abort the whole run. Skip
@@ -5368,6 +5426,11 @@ public final class FiberAnalysisDialog {
             Runnable tick = batchTileTick;
             if (tick != null) {
                 tick.run(); // whole-batch progress/ETA (batch runs only; null otherwise)
+            }
+        }
+        } finally {
+            if (tilePool != null) {
+                tilePool.shutdownNow(); // a cancelled or failed run must not leave tiles reading
             }
         }
         List<FiberSocketClient.Fiber> finalFibers = all;

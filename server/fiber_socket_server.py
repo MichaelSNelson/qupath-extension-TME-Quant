@@ -152,41 +152,73 @@ class _Tee:
                 pass
 
 
+# Shared state for the run log. One handler and one stdout/stderr tee are installed for the
+# FIRST request that asks for a given file and removed by the LAST one to finish, counted here.
+_run_log_state = {"key": None, "fh": None, "handler": None, "refs": 0, "out": None, "err": None}
+
+
 @contextlib.contextmanager
 def _run_file_logging(log_dir, log_file):
     """Append this request's full log (logger lines + FIRE prints) to
     ``<log_dir>/<log_file>``. No-op when the client didn't request logging or the
-    file can't be opened (analysis still proceeds normally)."""
+    file can't be opened (analysis still proceeds normally).
+
+    REFERENCE COUNTED, and the lock is held only to install or remove the handler -- never
+    across the analysis itself. The previous version wrapped its ``yield`` in the lock, so a
+    second concurrent request blocked until the first had finished tracing: with logging on
+    (the default) the server was effectively single-threaded no matter how many tiles a client
+    sent at once. Tiles of one run share a log file, so they share one handler and one tee.
+
+    A request naming a DIFFERENT file while one is already open (two runs at once) logs to the
+    console only, rather than fighting over sys.stdout.
+    """
     if not log_dir or not log_file:
         yield
         return
-    try:
-        os.makedirs(log_dir, exist_ok=True)
-        fh = open(os.path.join(log_dir, log_file), "a", encoding="utf-8", buffering=1)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not open server run log in %r: %s", log_dir, exc)
+    key = os.path.join(log_dir, log_file)
+    joined = False
+    with _run_log_lock:
+        st = _run_log_state
+        if st["refs"] > 0:
+            if st["key"] == key:
+                st["refs"] += 1
+                joined = True
+        else:
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+                fh = open(key, "a", encoding="utf-8", buffering=1)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not open server run log in %r: %s", log_dir, exc)
+                fh = None
+            if fh is not None:
+                handler = logging.StreamHandler(fh)
+                handler.setFormatter(logging.Formatter(_LOG_FMT))
+                logging.getLogger().addHandler(handler)
+                # Console handlers captured the ORIGINAL stderr at construction, so they keep
+                # printing to the console; the tee adds the file copy for bare prints.
+                st.update(key=key, fh=fh, handler=handler, refs=1,
+                          out=sys.stdout, err=sys.stderr)
+                sys.stdout = _Tee(st["out"], fh)
+                sys.stderr = _Tee(st["err"], fh)
+                joined = True
+    if not joined:
         yield
         return
-    handler = logging.StreamHandler(fh)
-    handler.setFormatter(logging.Formatter(_LOG_FMT))
-    root = logging.getLogger()
-    with _run_log_lock:
-        root.addHandler(handler)
-        old_out, old_err = sys.stdout, sys.stderr
-        # Console handlers captured the ORIGINAL stderr at construction, so they
-        # keep printing to the console; the tee adds the file copy for prints.
-        sys.stdout = _Tee(old_out, fh)
-        sys.stderr = _Tee(old_err, fh)
-        try:
-            yield
-        finally:
-            sys.stdout, sys.stderr = old_out, old_err
-            root.removeHandler(handler)
-            try:
-                fh.flush()
-                fh.close()
-            except Exception:  # noqa: BLE001
-                pass
+    try:
+        yield
+    finally:
+        with _run_log_lock:
+            st = _run_log_state
+            st["refs"] -= 1
+            if st["refs"] <= 0:
+                sys.stdout, sys.stderr = st["out"], st["err"]
+                logging.getLogger().removeHandler(st["handler"])
+                try:
+                    st["fh"].flush()
+                    st["fh"].close()
+                except Exception:  # noqa: BLE001
+                    pass
+                st.update(key=None, fh=None, handler=None, refs=0, out=None, err=None)
 
 
 # ---------------------------------------------------------------------------
@@ -1837,6 +1869,53 @@ def _get_executor():
     return _EXECUTOR
 
 
+_TRACE_EXECUTOR = None
+_TRACE_WORKERS = int(os.environ.get("TMEQUANT_TRACE_WORKERS", "0") or 0)
+_trace_lock = threading.Lock()
+
+
+def _trace_worker_count(meta):
+    """How many worker PROCESSES to trace with. 0/1 keeps everything in this process.
+
+    Off unless asked for, because it changes where every tile is executed. The client sets
+    it per request; the env var is the fallback for a server driven by something else.
+    """
+    try:
+        n = int(float(meta.get("trace_workers", _TRACE_WORKERS) or 0))
+    except (TypeError, ValueError):
+        n = _TRACE_WORKERS
+    return max(0, min(n, 32))
+
+
+def _get_trace_executor(n):
+    """Lazily build the tracer pool. Workers get the resolved FIRE defaults so they never
+    have to load the pipeline (the flow and centerline tracers do not use it)."""
+    global _TRACE_EXECUTOR
+    with _trace_lock:
+        if _TRACE_EXECUTOR is None:
+            import trace_worker
+            ctx = multiprocessing.get_context("spawn")
+            _TRACE_EXECUTOR = concurrent.futures.ProcessPoolExecutor(
+                max_workers=n, mp_context=ctx,
+                initializer=trace_worker.init, initargs=(_DEFAULT_PARAMS,),
+            )
+            logger.info("Tracer pool: %d worker process(es). The flow/centerline tracers are "
+                        "GIL-bound, so threads do not overlap them; processes do.", n)
+        return _TRACE_EXECUTOR
+
+
+def _analyze_in_worker(image, meta, mask, exclude, n):
+    """Run one tile in the pool and replay its log lines here, so the run transcript still
+    has them even though they were produced in another process."""
+    import trace_worker
+    fut = _get_trace_executor(n).submit(trace_worker.analyze, image, meta, mask, exclude)
+    fibers, stats, text = fut.result()
+    for line in text.splitlines():
+        if line.strip():
+            logger.info("[worker] %s", line)
+    return fibers, stats
+
+
 _SEED_HINT = (
     "This tile produced too many fibre fragments for FIRE's linking step to hold (it grows with "
     "the fibre COUNT and how many fibres cross at shared points, not overall brightness). Try, in "
@@ -2118,26 +2197,55 @@ def _flow_orientation(image, sigmas=(2.0, 4.0, 8.0)):
 
 def _flow_sample(a, x, y):
     """Bilinear sample of `a`, vectorised over N points."""
-    h, w = a.shape
-    x = np.clip(x, 0, w - 1.001)
-    y = np.clip(y, 0, h - 1.001)
-    x0 = x.astype(np.int32)
-    y0 = y.astype(np.int32)
-    fx = x - x0
-    fy = y - y0
+    return _flow_gather(a.reshape(-1), _flow_weights(a.shape, x, y))
+
+
+def _flow_weights(shape, x, y):
+    """Bilinear gather indices + weights for points (x, y), as FLAT offsets.
+
+    Split out from the sampling because the walk reads THREE fields -- coherence and the two
+    direction components -- at the same positions on every step, and used to redo the clip,
+    the int conversion, the fractions and the four corner indices once per field. Profiling a
+    single tile put 66% of the whole trace in this arithmetic. Flat offsets also let the
+    gather use take() rather than 2-D fancy indexing, which is appreciably faster.
+    """
+    h, w = shape
+    xc = np.clip(x, 0, w - 1.001)
+    yc = np.clip(y, 0, h - 1.001)
+    x0 = xc.astype(np.int32)
+    y0 = yc.astype(np.int32)
+    fx = xc - x0
+    fy = yc - y0
     x1 = np.minimum(x0 + 1, w - 1)
     y1 = np.minimum(y0 + 1, h - 1)
-    return (a[y0, x0] * (1 - fx) * (1 - fy) + a[y0, x1] * fx * (1 - fy)
-            + a[y1, x0] * (1 - fx) * fy + a[y1, x1] * fx * fy)
+    r0 = y0 * w
+    r1 = y1 * w
+    gx = 1.0 - fx
+    gy = 1.0 - fy
+    return (r0 + x0, r0 + x1, r1 + x0, r1 + x1, gx * gy, fx * gy, gx * fy, fx * fy)
+
+
+def _flow_gather(flat, wts):
+    """Bilinear value of one FLATTENED field at the positions `wts` was built for."""
+    i00, i01, i10, i11, w00, w01, w10, w11 = wts
+    return (flat.take(i00) * w00 + flat.take(i01) * w01
+            + flat.take(i10) * w10 + flat.take(i11) * w11)
 
 
 def _flow_walk(ux, uy, coh, mask, sx, sy, sign, step, max_steps, coh_min, maxturn):
     """March every seed one way at once. Returns (steps, N, 2) positions and per-seed step counts."""
     n = len(sx)
+    uxf, uyf, cohf = ux.reshape(-1), uy.reshape(-1), coh.reshape(-1)
     x = sx.astype(np.float32).copy()
     y = sy.astype(np.float32).copy()
-    dx = _flow_sample(ux, x, y) * sign
-    dy = _flow_sample(uy, x, y) * sign
+    w0 = _flow_weights(ux.shape, x, y)
+    dx = _flow_gather(uxf, w0) * sign
+    dy = _flow_gather(uyf, w0) * sign
+    # (max_steps, n, 2) float32. At the old batch of 20000 seeds this was a 128 MB buffer,
+    # allocated and NaN-filled twice per batch, and the walk then strode through it every
+    # step -- the tracer was memory-bound, not compute-bound. Batching at 2000 keeps it to
+    # ~13 MB and measured 2.8x faster on one tile, with bit-identical output (seeds are
+    # walked independently, so batching changes grouping only).
     traj = np.full((max_steps, n, 2), np.nan, dtype=np.float32)
     alive = np.ones(n, bool)
     nsteps = np.zeros(n, np.int32)
@@ -2152,9 +2260,10 @@ def _flow_walk(ux, uy, coh, mask, sx, sy, sign, step, max_steps, coh_min, maxtur
         xi = np.clip(nx, 0, w - 1).astype(np.int32)
         yi = np.clip(ny, 0, h - 1).astype(np.int32)
         ok &= mask[yi, xi]
-        ok &= _flow_sample(coh, nx, ny) >= coh_min
-        vx = _flow_sample(ux, nx, ny)
-        vy = _flow_sample(uy, nx, ny)
+        wts = _flow_weights(ux.shape, nx, ny)   # once, then read all three fields with it
+        ok &= _flow_gather(cohf, wts) >= coh_min
+        vx = _flow_gather(uxf, wts)
+        vy = _flow_gather(uyf, wts)
         flip = (vx * dx + vy * dy) < 0          # the field is undirected; keep going the same way
         vx = np.where(flip, -vx, vx)
         vy = np.where(flip, -vy, vy)
@@ -2172,7 +2281,7 @@ def _flow_walk(ux, uy, coh, mask, sx, sy, sign, step, max_steps, coh_min, maxtur
 
 
 def trace_flow(image, mask, parallel_px=17.0, coh_min=0.05, step=1.5, max_len=1200,
-               max_turn_deg=35.0, min_len_px=23.0, batch=20000):
+               max_turn_deg=35.0, min_len_px=23.0, batch=2000):
     """Trace fibres by following the orientation field; keep the LONGEST, spaced `parallel_px` apart.
 
     `parallel_px` is the "parallel fibre distance": the minimum lateral spacing between kept fibres
@@ -3013,7 +3122,15 @@ def run_analysis(image: np.ndarray, meta: dict, mask=None, exclude=None) -> dict
     stats = {}
     if _BACKEND == "real":
         try:
-            fibers = analyze_real(image, meta, mask, stats_out=stats, exclude=exclude)
+            # FIRE keeps its own isolated-worker path (it needs the compiled backend and its
+            # crash/retry semantics); only the pure-numpy tracers go to the pool.
+            tracer = str(meta.get("tracer", "fire") or "fire").lower()
+            workers = _trace_worker_count(meta) if tracer in ("flow", "centerline") else 0
+            if workers > 1:
+                fibers, wstats = _analyze_in_worker(image, meta, mask, exclude, workers)
+                stats.update(wstats or {})
+            else:
+                fibers = analyze_real(image, meta, mask, stats_out=stats, exclude=exclude)
         except Exception as exc:  # noqa: BLE001
             msg = str(exc)
             logger.error("Real analysis failed: %s", msg)

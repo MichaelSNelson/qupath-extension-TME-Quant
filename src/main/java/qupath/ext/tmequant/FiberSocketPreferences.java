@@ -58,6 +58,10 @@ public final class FiberSocketPreferences {
     private static final DoubleProperty WEB_CAP =
             PathPrefs.createPersistentPreference("tmequant.webCap", 200000.0);
 
+    /** Tiles traced at once (client threads + server worker processes). 1 = one at a time. */
+    private static final DoubleProperty PARALLEL_TILES =
+            PathPrefs.createPersistentPreference("tmequant.parallelTiles", 1.0);
+
     /** Stage 0 exclusion regions: on/off, where they come from, and how they are applied. */
     private static final BooleanProperty EXCL_ENABLED =
             PathPrefs.createPersistentPreference("tmequant.exclEnabled", false);
@@ -88,6 +92,10 @@ public final class FiberSocketPreferences {
 
     public static BooleanProperty antiFlowProperty() {
         return ANTI_FLOW;
+    }
+
+    public static DoubleProperty parallelTilesProperty() {
+        return PARALLEL_TILES;
     }
 
     public static DoubleProperty webCapProperty() {
