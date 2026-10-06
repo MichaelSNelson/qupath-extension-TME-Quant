@@ -28,6 +28,13 @@ Worker threads do only the read-and-trace; ordering, counters, the live overlay,
 ETA all stay in one consuming loop that walks the results in submission order, so the assembled
 fibre list matches a serial run and nothing downstream had to become thread-safe.
 
+**Stopping the server no longer leaves worker processes behind.** Spawned workers do not die
+with their parent, and only the SHUTDOWN command reached the cleanup — Ctrl-C unwound past it and
+a kill ended the process outright, so every other way of stopping the server orphaned one process
+per pool slot, and a few restarts stacked them up. The accept loop is now wrapped in a `finally`,
+SIGINT and SIGTERM set the shutdown flag instead of killing the process, and `atexit` is the
+backstop. Verified: worker count returns to its starting value after the server stops.
+
 **The server was serialising itself.** `_run_file_logging` held its lock across the entire
 analysis, so with run logging on — the default — a second concurrent request waited for the first
 to finish tracing. It is reference counted now, with the lock held only to install and remove the

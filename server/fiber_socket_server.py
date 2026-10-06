@@ -1978,6 +1978,23 @@ def _reset_executor():
     _EXECUTOR = None
 
 
+def _shutdown_pools():
+    """Tear down BOTH worker pools when the server stops.
+
+    The tracer pool holds spawned processes that do NOT die with the parent: killing the
+    server used to leave one orphan per worker behind, eating memory until they were found
+    by hand, and a few restarts would stack them up.
+    """
+    global _TRACE_EXECUTOR
+    _reset_executor()
+    try:
+        if _TRACE_EXECUTOR is not None:
+            _TRACE_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    except Exception:  # noqa: BLE001
+        pass
+    _TRACE_EXECUTOR = None
+
+
 def _run_fire(fire_params_value, ll1, image):
     """Run FIRE, isolated in a worker subprocess when possible.
 
@@ -3351,6 +3368,34 @@ def handle_client(conn: socket.socket, addr, shutdown_event: threading.Event) ->
 # ---------------------------------------------------------------------------
 def serve(host: str, port: int) -> None:
     shutdown_event = threading.Event()
+    # Stopping the server has to tear the worker pools down, and there are three ways it gets
+    # stopped: the SHUTDOWN command, Ctrl-C, and a kill from whatever launched it. Only the
+    # first used to reach the cleanup -- SIGTERM ends the process outright and SIGINT unwinds
+    # past it -- so every other route left one orphaned worker process per pool slot behind,
+    # and a few restarts stacked them up. Handlers turn a signal into the normal exit path;
+    # atexit is the backstop for anything that still slips through.
+    import atexit
+    import signal
+
+    atexit.register(_shutdown_pools)
+
+    def _stop(signum, _frame):
+        logger.info("Signal %s received - shutting down.", signum)
+        shutdown_event.set()
+
+    for _sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(_sig, _stop)
+        except (ValueError, OSError, AttributeError):
+            pass  # not the main thread, or the platform lacks it
+    try:
+        _serve_loop(host, port, shutdown_event)
+    finally:
+        _shutdown_pools()
+        logger.info("Server stopped.")
+
+
+def _serve_loop(host: str, port: int, shutdown_event: threading.Event) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -3380,7 +3425,6 @@ def serve(host: str, port: int) -> None:
                 target=handle_client, args=(conn, addr, shutdown_event), daemon=True
             )
             t.start()
-    logger.info("Server stopped.")
 
 
 def main(argv=None) -> int:
