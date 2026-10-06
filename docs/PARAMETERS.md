@@ -82,7 +82,7 @@ Put these in the **Extra params (JSON)** box, e.g. `{"thresh_ext": 0.5, "thresh_
 | Key | Readable name | Default | What it does | Promote? |
 |---|---|---|---|---|
 | `thresh_ext` | extension angle thresh | 0.342 (cos 70°) | **Most important knob for wavy collagen.** Max bend allowed per step, as a cosine. Lower (e.g. 0.17 = cos 80°) allows very tortuous fibers; higher (0.5 = cos 60°) keeps only straighter ones. | ✅ **Now in GUI** (Max bend angle, in degrees) |
-| `lam_dirdecay` | direction momentum | 0.5 | How much the running direction smooths the trace. Higher (→0.8) tracks persistent curves; lower reacts to sharp bends. | Medium |
+| `lam_dirdecay` | direction decay | 0.5 | How quickly the heading turns toward each new local step: `dir = dir/(1+λ) + best_dir·λ/(1+λ)`. Higher (→0.8) swings the heading to follow the ridge → **traces bend/follow curves**; lower (→0) freezes the running heading → **straighter traces that resist turning**. (The "Medium" wavy-collagen recipe below uses 0.7.) | Medium |
 | `s_minstep` | min step size | 2 | Min pixels advanced per tracing step. | Low |
 | `s_maxstep` | max step size | 6 | Max pixels advanced per step. | Low |
 | `s_fiberdir` | direction window | 4 | Past vertices used for the running-mean direction. | Low |
