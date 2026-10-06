@@ -7,7 +7,7 @@ rem    1. Finds MSYS2 -- and if it's missing, ASKS before installing (you can
 rem       install it yourself to any drive, or set MSYS2_ROOT).
 rem    2. On first run, does the one-time setup (system update + setup_fire_server.sh)
 rem       and writes a .tmequant_setup_ok marker so later runs skip straight to launch.
-rem    3. Starts the server in the MSYS2 UCRT64 console (shows the ~30-40 s load
+rem    3. Starts the server in the MSYS2 UCRT64 console (shows the ~30 s+ load (hardware-dependent)
 rem       and the "listening on 127.0.0.1:5101" banner).
 rem
 rem  USAGE

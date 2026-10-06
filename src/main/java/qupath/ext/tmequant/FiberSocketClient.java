@@ -1,6 +1,7 @@
 package qupath.ext.tmequant;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
@@ -34,7 +35,9 @@ import org.slf4j.LoggerFactory;
 public final class FiberSocketClient {
 
     private static final Logger logger = LoggerFactory.getLogger(FiberSocketClient.class);
-    private static final Gson GSON = new Gson();
+    // Tolerate NaN (a fibre width can be NaN); plain Gson throws on NaN. Matches the Python side.
+    private static final Gson GSON =
+            new GsonBuilder().serializeSpecialFloatingPointValues().create();
 
     // 8-byte commands (must match the Python server constants exactly).
     private static final byte[] CMD_PING = "PING____".getBytes(StandardCharsets.US_ASCII);
@@ -49,7 +52,10 @@ public final class FiberSocketClient {
     private final int readTimeoutMs;
 
     public FiberSocketClient(String host, int port) {
-        this(host, port, 3000, 120000);
+        // Read timeout must exceed the server's per-tile FIRE timeout (180 s) plus response transfer,
+        // so the server can fail a too-dense tile GRACEFULLY (and the client skip it) instead of the
+        // client aborting mid-analysis. 300 s leaves margin for the large debug-export payload.
+        this(host, port, 3000, 300000);
     }
 
     public FiberSocketClient(String host, int port, int connectTimeoutMs, int readTimeoutMs) {
@@ -99,9 +105,23 @@ public final class FiberSocketClient {
      */
     public AnalyzeResponse analyze(BufferedImage region, String metaJson, BufferedImage mask)
             throws IOException {
+        return analyze(region, metaJson, mask, null);
+    }
+
+    /**
+     * As {@link #analyze(BufferedImage, String, BufferedImage)}, with an additional exclusion mask.
+     *
+     * @param exclude optional "don't trace here" mask (region-sized). When non-null the meta must
+     *     set {@code "has_exclude_mask":true}; it is sent as a further block AFTER the boundary
+     *     mask, so a request with neither, or with only the boundary, is unchanged on the wire.
+     */
+    public AnalyzeResponse analyze(
+            BufferedImage region, String metaJson, BufferedImage mask, BufferedImage exclude)
+            throws IOException {
         byte[] meta = metaJson.getBytes(StandardCharsets.UTF_8);
         byte[] png = encodePng(region);
         byte[] maskPng = mask == null ? null : encodePng(mask);
+        byte[] excludePng = exclude == null ? null : encodePng(exclude);
 
         try (Socket s = openSocket()) {
             DataOutputStream out = new DataOutputStream(s.getOutputStream());
@@ -115,6 +135,10 @@ public final class FiberSocketClient {
             if (maskPng != null) {
                 out.writeInt(maskPng.length);
                 out.write(maskPng);
+            }
+            if (excludePng != null) {
+                out.writeInt(excludePng.length);
+                out.write(excludePng);
             }
             out.flush();
 
@@ -238,7 +262,30 @@ public final class FiberSocketClient {
         @SerializedName("frac_above")
         public Double fracAbove;
 
+        /** Present only for a single-tile debug export (meta.debug_export). */
+        public DebugExport debug;
+
         public List<Fiber> fibers;
+    }
+
+    /** Base64 PNGs + scalars of what FIRE actually traced on, for the FULL TEST-EXPORT. */
+    public static final class DebugExport {
+        @SerializedName("gray_png")
+        public String grayPng;      // the prescaled/ridge image FIRE received
+        @SerializedName("mask_png")
+        public String maskPng;      // threshold foreground
+        @SerializedName("dist_png")
+        public String distPng;      // cityblock distance map (drives search radius / jumps)
+        @SerializedName("overlay_png")
+        public String overlayPng;   // traced fibres on the grey
+        public Double thresh;
+        @SerializedName("dist_max")
+        public Double distMax;
+        @SerializedName("foreground_frac")
+        public Double foregroundFrac;
+        public Integer width;
+        public Integer height;
+        public String error;
     }
 
     /** Response to GRIDSRCH: ranked parameter combos. */
@@ -273,6 +320,9 @@ public final class FiberSocketClient {
         public Integer matched;
         @SerializedName("n_gt")
         public Integer nGt;
+        /** Indices (into this piece's gt_lines) of the GT fibers this combo actually detected. */
+        @SerializedName("matched_gt")
+        public List<Integer> matchedGt;
 
         // Count-primary metrics.
         @SerializedName("n_detected")
@@ -316,8 +366,38 @@ public final class FiberSocketClient {
         @SerializedName("length_end")
         public double lengthEnd;
 
-        public double width;
+        public double width; // MEAN width (analysed px); also drives the widMAX filter
+        @SerializedName("width_max")
+        public double widthMax = Double.NaN; // max width along the fibre (analysed px)
+        @SerializedName("width_std")
+        public double widthStd = Double.NaN; // width std-dev along the fibre (analysed px)
         public double straightness;
+
+        // --- Crimp / waviness (computed on the traced centreline, both tracers) -------------------
+        /** Sharpest single direction change along the fibre (degrees). */
+        @SerializedName("kink_max_deg")
+        public double kinkMaxDeg = Double.NaN;
+        /** Number of turns at or above the kink threshold (30 deg). */
+        @SerializedName("kink_count")
+        public double kinkCount = Double.NaN;
+        /** Total turning per unit length (deg per ANALYSED px; converted to deg/unit for output). */
+        public double curvature = Double.NaN;
+        /** RMS perpendicular deviation from the fibre's own smoothed centreline (analysed px). */
+        @SerializedName("crimp_amp")
+        public double crimpAmp = Double.NaN;
+        /** Mean crimp wavelength between turn reversals (analysed px). */
+        @SerializedName("crimp_period")
+        public double crimpPeriod = Double.NaN;
+
+        /**
+         * Angle (deg) between this fibre and an INDEPENDENT estimate of the local collagen flow,
+         * from the optional anti-flow check; NaN when that estimate had no confident opinion here.
+         * ~0 means the fibre runs along the collagen, toward 90 means across it. Independent
+         * because it uses the structure tensor, not the field the flow tracer followed -- checking
+         * a tracer against its own field only confirms it.
+         */
+        @SerializedName("anti_flow_deg")
+        public double antiFlowDeg = Double.NaN;
 
         /** Index of the tile this fiber came from (for cross-tile dedup/stitch). */
         public Integer tile;

@@ -28,22 +28,41 @@ final class ServerLauncher {
     private static final Logger logger = LoggerFactory.getLogger(ServerLauncher.class);
     private static final String TITLE = "TME Quant server";
 
-    /** First start loads the C++ FIRE backend (~30-40 s); give generous head-room. */
+    /** First start loads the C++ FIRE backend (~30 s or longer, hardware-dependent); give generous head-room. */
     private static final long POLL_TIMEOUT_MS = 120_000;
     private static final long POLL_INTERVAL_MS = 2_000;
 
     private ServerLauncher() {}
 
     /** True if a quick PING to the configured host/port succeeds within {@code timeoutMs}. */
-    static boolean isReachable(int timeoutMs) {
+    /** One PING, or null if the server can't be reached / errors. */
+    private static FiberSocketClient.PingResponse tryPing(int timeoutMs) {
         String host = FiberSocketPreferences.getHost();
         int port = FiberSocketPreferences.getPort();
         try {
-            FiberSocketClient.PingResponse resp =
-                    new FiberSocketClient(host, port, timeoutMs, timeoutMs).ping();
-            return resp != null && resp.ok;
+            return new FiberSocketClient(host, port, timeoutMs, timeoutMs).ping();
         } catch (Exception e) {
-            return false;
+            return null;
+        }
+    }
+
+    static boolean isReachable(int timeoutMs) {
+        FiberSocketClient.PingResponse resp = tryPing(timeoutMs);
+        return resp != null && resp.ok;
+    }
+
+    /**
+     * If the server is up but running the SYNTHETIC fallback (the real FIRE backend didn't
+     * load), the FIRE parameters have no effect and results are meaningless — warn the user
+     * with a pointer to the fix rather than letting them tune against garbage.
+     */
+    private static void warnIfSynthetic(FiberSocketClient.PingResponse resp) {
+        if (resp != null && "synthetic".equals(resp.backend)) {
+            Platform.runLater(() -> Dialogs.showWarningNotification(TITLE,
+                    "Connected, but the server is running the SYNTHETIC fallback — the real FIRE "
+                    + "backend did not load, so detection parameters have NO effect. Fix it before "
+                    + "trusting results: in the server's MSYS2 window run "
+                    + "./diagnose_backend.sh (then ./build_backend.sh && ./setup_fire_server.sh)."));
         }
     }
 
@@ -53,7 +72,9 @@ final class ServerLauncher {
      */
     static void ensureReachable(QuPathGUI qupath, Runnable onReady) {
         new Thread(() -> {
-            if (isReachable(800)) {
+            FiberSocketClient.PingResponse resp = tryPing(800);
+            if (resp != null && resp.ok) {
+                warnIfSynthetic(resp);
                 Platform.runLater(onReady);
             } else {
                 Platform.runLater(() -> decideAndAct(qupath, onReady));
@@ -113,14 +134,16 @@ final class ServerLauncher {
             return;
         }
         Dialogs.showInfoNotification(TITLE,
-                "Starting the FIRE server… watch its console window (first start ~30-40 s). "
+                "Starting the FIRE server… watch its console window (first start ~30 s or longer, depending on hardware). "
                 + "The dialog will open when it's ready.");
         new Thread(() -> {
             long deadline = System.currentTimeMillis() + POLL_TIMEOUT_MS;
             while (System.currentTimeMillis() < deadline) {
                 sleep(POLL_INTERVAL_MS);
-                if (isReachable(800)) {
+                FiberSocketClient.PingResponse resp = tryPing(800);
+                if (resp != null && resp.ok) {
                     logger.info("Fiber server became reachable; opening dialog.");
+                    warnIfSynthetic(resp);
                     Platform.runLater(onReady);
                     return;
                 }

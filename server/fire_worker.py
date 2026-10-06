@@ -25,6 +25,54 @@ _BACKEND_OK = False
 _BACKEND_ERR = None
 
 
+def _ucrt64_bin_dirs():
+    """Candidate <MSYS2>\\ucrt64\\bin directories, most-reliable first.
+
+    Derived from the running interpreter (the mingw python.exe lives IN
+    ucrt64\\bin) and MSYS2_ROOT, so a non-default MSYS2 install location works;
+    C:\\msys64 is only the last-resort fallback.
+    """
+    dirs = [os.path.dirname(sys.executable)]  # the actual ucrt64\bin of this python
+    root = os.environ.get("MSYS2_ROOT")
+    if root:
+        dirs.append(os.path.join(root, "ucrt64", "bin"))
+    dirs.append(r"C:\msys64\ucrt64\bin")
+    return dirs
+
+
+def _preload_mingw_runtime(bin_dirs):
+    """Pin the correct ucrt64 GCC runtime DLLs into this process by FULL PATH.
+
+    The spawned worker does not inherit the launcher's ucrt64-first PATH, so
+    `fiber_backend`'s dependencies can otherwise resolve to a wrong-version
+    libstdc++/libgomp already on the machine, giving "DLL load failed ... the
+    specified procedure could not be found" (a symbol skew, not a missing file).
+    Loading the ucrt64 copies first — by absolute path — means Windows reuses
+    those handles when the .pyd asks for them by name, regardless of search order.
+    Registering the DLL DIRECTORY is not enough; an incompatible copy elsewhere
+    can still win. Ordered so each lib's dependency is already resident.
+    """
+    if os.name != "nt":
+        return
+    import ctypes
+    # The real ucrt64\bin is the first candidate that actually holds the C++
+    # runtime (a venv's Scripts dir does not), so probe for libstdc++-6.dll.
+    chosen = next(
+        (d for d in bin_dirs if d and os.path.isfile(os.path.join(d, "libstdc++-6.dll"))),
+        None,
+    )
+    if not chosen:
+        return
+    for name in ("libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libstdc++-6.dll",
+                 "libgomp-1.dll", "libquadmath-0.dll", "libssp-0.dll"):
+        p = os.path.join(chosen, name)
+        if os.path.isfile(p):
+            try:
+                ctypes.WinDLL(p)
+            except OSError:
+                pass  # optional runtime lib; skip if this build doesn't need it
+
+
 def _setup(repo_str):
     repo = Path(repo_str)
     for c in (repo / "src", repo / "src" / "tme_quant" / "src", repo / "src" / "ctfire_py"):
@@ -32,15 +80,24 @@ def _setup(repo_str):
             sys.path.insert(0, str(c))
     os.environ.setdefault("MPLBACKEND", "Agg")
     if os.name == "nt":
-        ucrt = r"C:\msys64\ucrt64\bin"
-        for d in (os.path.dirname(sys.executable), str(repo / "src" / "ctfire_py"), ucrt):
-            if d and os.path.isdir(d):
+        ucrt_dirs = _ucrt64_bin_dirs()
+        seen = set()
+        for d in (str(repo / "src" / "ctfire_py"), *ucrt_dirs):
+            if d and d not in seen and os.path.isdir(d):
+                seen.add(d)
                 try:
                     os.add_dll_directory(d)
                 except Exception:
                     pass
-        if os.path.isdir(ucrt):
-            os.environ["PATH"] = ucrt + os.pathsep + os.environ.get("PATH", "")
+        # Front-load PATH with the first REAL ucrt64\bin (the one holding the C++
+        # runtime), not merely the first existing dir -- in a venv the running
+        # interpreter's own folder is Scripts\, which has none of the GCC DLLs.
+        for d in ucrt_dirs:
+            if os.path.isfile(os.path.join(d, "libstdc++-6.dll")):
+                os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+                break
+        # Pin the correct GCC runtime BEFORE fiber_backend is imported.
+        _preload_mingw_runtime(ucrt_dirs)
 
 
 def worker_init(repo_str):

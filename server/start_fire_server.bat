@@ -57,11 +57,11 @@ rem               compiled .pyd's GCC runtime DLLs resolve and the backend loads
 rem   -defterm  : use this Windows console instead of spawning a mintty window
 rem   -no-start : don't relaunch via `start`
 rem   -here     : keep the current directory
-rem   -c        : the command to run -- cygpath turns the Windows .bat folder
-rem               into an MSYS path so we cd to it regardless of drive letter.
+rem   -c        : the command to run -- keep this TRIVIAL: no cd inside -c, no  
+rem               $()/&&/escaped quotes (cmd mangles them); cd /d below + -here.
 rem ---------------------------------------------------------------------------
-call "%MSYS2_ROOT%\msys2_shell.cmd" -ucrt64 -defterm -no-start -here -c ^
-  "cd \"$(cygpath -u '%HERE%')\" && ./start_fire_server.sh %PORT%"
+cd /d "%~dp0."
+call "%MSYS2_ROOT%\msys2_shell.cmd" -ucrt64 -defterm -no-start -here -c "./start_fire_server.sh %PORT%"
 
 echo.
 echo Server stopped. Press any key to close this window.

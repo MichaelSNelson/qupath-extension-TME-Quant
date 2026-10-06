@@ -2,12 +2,15 @@ package qupath.ext.tmequant;
 
 import java.util.ArrayList;
 import java.util.List;
+import org.locationtech.jts.geom.Coordinate;
+import org.locationtech.jts.geom.Geometry;
 import qupath.lib.common.ColorTools;
 import qupath.lib.geom.Point2;
 import qupath.lib.objects.PathObject;
 import qupath.lib.objects.PathObjects;
 import qupath.lib.objects.classes.PathClass;
 import qupath.lib.regions.ImagePlane;
+import qupath.lib.roi.GeometryTools;
 import qupath.lib.roi.ROIs;
 import qupath.lib.roi.interfaces.ROI;
 
@@ -26,10 +29,49 @@ import qupath.lib.roi.interfaces.ROI;
  * Each fiber becomes a {@link qupath.lib.roi.interfaces.ROI#isLine() line/polyline}
  * ROI (a PolylineROI), wrapped as either an annotation or a detection. Per-fiber
  * properties (angle, length, width, straightness) are stored as measurements.
+ *
+ * <p>When a {@code restrictRoi} is supplied, each fiber is geometrically clipped to
+ * that ROI (the inside portion(s) are kept), remnants shorter than the minimum fiber
+ * length are dropped, and a fiber split by a concave boundary yields several objects
+ * whose names are suffixed {@code .1}, {@code .2}, … Length/straightness/angle are
+ * recomputed from the clipped geometry; width is retained from the server (a local
+ * property that cannot be recomputed from the trimmed centreline).</p>
  */
 public final class FiberObjectBuilder {
 
     private FiberObjectBuilder() {}
+
+    /** Build with no spatial restriction (server metrics used verbatim). */
+    /**
+     * Identifier of the run currently writing objects, stamped onto every one as a "Run ID"
+     * measurement so a detection can be traced back to the settings that produced it.
+     *
+     * <p>The value is the run's timestamp as {@code yyyyMMddHHmmss} (e.g. 20261004164500): unique,
+     * chronologically sortable, and it names the matching log pair in
+     * {@code <project>/logs/fiber-analysis/}. 0 means "not set" and no measurement is written.</p>
+     *
+     * <p>Static because a run is a single sequential pass on one background thread, and threading
+     * it through every call site buys nothing; set it with {@link #setRunId} around a run.</p>
+     */
+    private static volatile double runId = 0.0;
+
+    /** Stamp this run id onto every object built from now on; 0 disables. */
+    public static void setRunId(double id) {
+        runId = id;
+    }
+
+    /** Parse a {@code yyyyMMdd-HHmmss} run stamp into the numeric id, or 0 if it does not parse. */
+    public static double runIdFromStamp(String stamp) {
+        if (stamp == null) {
+            return 0.0;
+        }
+        String digits = stamp.replaceAll("[^0-9]", "");
+        try {
+            return digits.length() == 14 ? Double.parseDouble(digits) : 0.0;
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
+    }
 
     public static List<PathObject> build(
             List<FiberSocketClient.Fiber> fibers,
@@ -40,6 +82,28 @@ public final class FiberObjectBuilder {
             ImagePlane plane,
             boolean asDetections,
             PathClass fiberClass) {
+        return build(fibers, regionX, regionY, downsample, pixelSizeMicrons, plane,
+                asDetections, fiberClass, null, 0.0);
+    }
+
+    /**
+     * Build, optionally clipping every fiber to {@code restrictRoi}.
+     *
+     * @param restrictRoi   area ROI (full-resolution coords) to clip fibers to, or null for none.
+     * @param minLenInUnit  minimum fiber length in the active unit (µm if calibrated, else px);
+     *                      clipped remnants shorter than this are dropped. Ignored when restrictRoi is null.
+     */
+    public static List<PathObject> build(
+            List<FiberSocketClient.Fiber> fibers,
+            double regionX,
+            double regionY,
+            double downsample,
+            double pixelSizeMicrons,
+            ImagePlane plane,
+            boolean asDetections,
+            PathClass fiberClass,
+            ROI restrictRoi,
+            double minLenInUnit) {
 
         List<PathObject> out = new ArrayList<>();
         if (fibers == null) {
@@ -49,7 +113,18 @@ public final class FiberObjectBuilder {
         // to full-resolution pixels (x downsample), then to microns if calibrated.
         boolean calibrated = pixelSizeMicrons > 0 && !Double.isNaN(pixelSizeMicrons);
         double toUnit = downsample * (calibrated ? pixelSizeMicrons : 1.0);
+        double pxToUnit = calibrated ? pixelSizeMicrons : 1.0; // full-res px -> unit (downsample already applied)
         String lenUnit = calibrated ? "um" : "px";
+
+        // Pre-convert the restriction ROI to a JTS geometry once.
+        Geometry restrictGeom = null;
+        if (restrictRoi != null) {
+            try {
+                restrictGeom = GeometryTools.roiToGeometry(restrictRoi);
+            } catch (Exception e) {
+                restrictGeom = null; // fall back to no clipping rather than fail the whole commit
+            }
+        }
 
         for (FiberSocketClient.Fiber f : fibers) {
             if (f.points == null || f.points.length < 2) {
@@ -73,32 +148,201 @@ public final class FiberObjectBuilder {
                     ? tacsClass(f.tacs)
                     : fiberClass;
 
-            ROI roi = ROIs.createPolylineROI(pts, plane);
-            PathObject obj = asDetections
-                    ? PathObjects.createDetectionObject(roi, cls)
-                    : PathObjects.createAnnotationObject(roi, cls);
+            if (restrictGeom == null) {
+                // ---- Unrestricted: keep the server-reported metrics verbatim ----
+                ROI roi = ROIs.createPolylineROI(pts, plane);
+                PathObject obj = asDetections
+                        ? PathObjects.createDetectionObject(roi, cls)
+                        : PathObjects.createAnnotationObject(roi, cls);
 
-            var ml = obj.getMeasurementList();
-            ml.put("Fiber ID", f.id);
-            ml.put("Angle (deg)", f.angle);
-            ml.put("Length (" + lenUnit + ")", f.lengthArc * toUnit);
-            ml.put("End-to-end length (" + lenUnit + ")", f.lengthEnd * toUnit);
-            if (!Double.isNaN(f.width)) {
-                ml.put("Width (" + lenUnit + ")", f.width * toUnit);
-            }
-            ml.put("Straightness", f.straightness);
-            if (f.angleToTangent != null) {
-                ml.put("Angle to boundary tangent (deg)", f.angleToTangent);
-            }
-            if (f.distanceToBoundary != null) {
-                ml.put("Distance to boundary (" + lenUnit + ")", f.distanceToBoundary * toUnit);
-            }
-            ml.close();
+                var ml = obj.getMeasurementList();
+                if (runId != 0.0) {
+                    ml.put("Run ID", runId);
+                }
+                ml.put("Fiber ID", f.id);
+                ml.put("Angle (deg)", f.angle);
+                ml.put("Length (" + lenUnit + ")", f.lengthArc * toUnit);
+                ml.put("End-to-end length (" + lenUnit + ")", f.lengthEnd * toUnit);
+                putWidths(ml, f, lenUnit, toUnit);
+                ml.put("Straightness", f.straightness);
+                // The clipped path below has always written these; this one had not, so the
+                // crimp/kink metrics appeared only when a run restricted to an object.
+                putWaviness(ml, f, lenUnit, toUnit);
+                if (f.angleToTangent != null) {
+                    ml.put("Angle to boundary tangent (deg)", f.angleToTangent);
+                }
+                if (f.distanceToBoundary != null) {
+                    ml.put("Distance to boundary (" + lenUnit + ")", f.distanceToBoundary * toUnit);
+                }
+                ml.close();
 
-            obj.setName((f.tacs != null && !f.tacs.isBlank() ? f.tacs + " " : "Fiber ") + f.id);
-            out.add(obj);
+                obj.setName((f.tacs != null && !f.tacs.isBlank() ? f.tacs + " " : "Fiber ") + f.id);
+                out.add(obj);
+                continue;
+            }
+
+            // ---- Restricted: clip the fiber to the ROI and keep in-length pieces ----
+            List<List<Point2>> kept = new ArrayList<>();
+            for (List<Point2> piece : clipToGeometry(pts, restrictGeom, plane)) {
+                if (piece.size() < 2) {
+                    continue;
+                }
+                double arcUnit = arcLength(piece) * pxToUnit;
+                if (arcUnit + 1e-9 < minLenInUnit) {
+                    continue; // remnant shorter than the min fiber length
+                }
+                kept.add(piece);
+            }
+            boolean split = kept.size() > 1;
+            for (int i = 0; i < kept.size(); i++) {
+                out.add(makeClippedFiber(kept.get(i), plane, asDetections, cls, f,
+                        toUnit, pxToUnit, lenUnit, split ? (i + 1) : -1));
+            }
         }
         return out;
+    }
+
+    /** Intersect a full-res polyline with a geometry; return each inside piece as a point list. */
+    private static List<List<Point2>> clipToGeometry(List<Point2> pts, Geometry restrictGeom, ImagePlane plane) {
+        List<List<Point2>> pieces = new ArrayList<>();
+        Geometry inside;
+        try {
+            ROI line = ROIs.createPolylineROI(pts, plane);
+            inside = restrictGeom.intersection(line.getGeometry());
+        } catch (Exception e) {
+            return pieces; // drop this fiber on a geometry error rather than crash the run
+        }
+        if (inside == null || inside.isEmpty()) {
+            return pieces;
+        }
+        for (int i = 0; i < inside.getNumGeometries(); i++) {
+            Geometry g = inside.getGeometryN(i);
+            Coordinate[] cs = g.getCoordinates();
+            if (cs == null || cs.length < 2) {
+                continue; // skip point/degenerate intersections
+            }
+            List<Point2> pc = new ArrayList<>(cs.length);
+            for (Coordinate c : cs) {
+                pc.add(new Point2(c.x, c.y));
+            }
+            pieces.add(pc);
+        }
+        return pieces;
+    }
+
+    /** Build one clipped-fiber object with metrics recomputed from the clipped geometry. */
+    private static PathObject makeClippedFiber(
+            List<Point2> pts, ImagePlane plane, boolean asDetections, PathClass cls,
+            FiberSocketClient.Fiber f, double toUnit, double pxToUnit, String lenUnit, int part) {
+        double arcPx = arcLength(pts);
+        Point2 a = pts.get(0);
+        Point2 b = pts.get(pts.size() - 1);
+        double endPx = dist(a, b);
+        double straight = arcPx > 0 ? Math.min(1.0, endPx / arcPx) : 0.0;
+        double angle = orientationDeg(a, b);
+
+        ROI roi = ROIs.createPolylineROI(pts, plane);
+        PathObject obj = asDetections
+                ? PathObjects.createDetectionObject(roi, cls)
+                : PathObjects.createAnnotationObject(roi, cls);
+
+        var ml = obj.getMeasurementList();
+        if (runId != 0.0) {
+            ml.put("Run ID", runId);
+        }
+        ml.put("Fiber ID", f.id);
+        if (part > 0) {
+            ml.put("Fiber part", part);
+        }
+        ml.put("Angle (deg)", angle);
+        ml.put("Length (" + lenUnit + ")", arcPx * pxToUnit);
+        ml.put("End-to-end length (" + lenUnit + ")", endPx * pxToUnit);
+        putWidths(ml, f, lenUnit, toUnit); // server widths (analysed px), best-effort after clipping
+        ml.put("Straightness", straight);
+        if (f.angleToTangent != null) {
+            ml.put("Angle to boundary tangent (deg)", f.angleToTangent);
+        }
+        if (f.distanceToBoundary != null) {
+            ml.put("Distance to boundary (" + lenUnit + ")", f.distanceToBoundary * toUnit);
+        }
+        ml.close();
+
+        obj.setName((f.tacs != null && !f.tacs.isBlank() ? f.tacs + " " : "Fiber ")
+                + f.id + (part > 0 ? "." + part : ""));
+        return obj;
+    }
+
+    /**
+     * Write mean / max / std-dev fibre-width measurements (each = 2× the distance-map radius along the
+     * fibre, converted from analysed px to the active unit). NaNs are skipped. A single fibre's width
+     * varies along its length, so all three are exposed rather than one collapsed value.
+     */
+    private static void putWidths(qupath.lib.measurements.MeasurementList ml,
+                                  FiberSocketClient.Fiber f, String lenUnit, double toUnit) {
+        if (!Double.isNaN(f.width)) {
+            ml.put("Width mean (" + lenUnit + ")", f.width * toUnit);
+        }
+        if (!Double.isNaN(f.widthMax)) {
+            ml.put("Width max (" + lenUnit + ")", f.widthMax * toUnit);
+        }
+        if (!Double.isNaN(f.widthStd)) {
+            ml.put("Width SD (" + lenUnit + ")", f.widthStd * toUnit);
+        }
+        putWaviness(ml, f, lenUnit, toUnit);
+    }
+
+    /**
+     * Crimp / waviness measurements, from the traced centreline. Angles are unit-free; the amplitude
+     * and period are lengths (analysed px -> output unit); curvature is turning PER length, so it is
+     * DIVIDED by toUnit (deg/px -> deg/unit). A tracer that smooths the crimp reports a small
+     * amplitude and few kinks, which is what makes the two tracers comparable.
+     */
+    private static void putWaviness(qupath.lib.measurements.MeasurementList ml,
+                                    FiberSocketClient.Fiber f, String lenUnit, double toUnit) {
+        if (!Double.isNaN(f.kinkMaxDeg)) {
+            ml.put("Kink max (deg)", f.kinkMaxDeg);
+        }
+        if (!Double.isNaN(f.kinkCount)) {
+            ml.put("Kink count", f.kinkCount);
+        }
+        if (!Double.isNaN(f.crimpAmp)) {
+            ml.put("Crimp amplitude (" + lenUnit + ")", f.crimpAmp * toUnit);
+        }
+        if (!Double.isNaN(f.crimpPeriod)) {
+            ml.put("Crimp period (" + lenUnit + ")", f.crimpPeriod * toUnit);
+        }
+        if (!Double.isNaN(f.curvature) && toUnit > 0) {
+            ml.put("Curvature (deg/" + lenUnit + ")", f.curvature / toUnit);
+        }
+        // Only present when the optional anti-flow check ran. Sort by it to review the fibres the
+        // pipeline is least sure about: ~0 runs along the collagen, toward 90 runs across it.
+        if (!Double.isNaN(f.antiFlowDeg)) {
+            ml.put("Anti-flow (deg)", f.antiFlowDeg);
+        }
+    }
+
+    private static double arcLength(List<Point2> pts) {
+        double s = 0;
+        for (int i = 1; i < pts.size(); i++) {
+            s += dist(pts.get(i - 1), pts.get(i));
+        }
+        return s;
+    }
+
+    private static double dist(Point2 a, Point2 b) {
+        return Math.hypot(a.getX() - b.getX(), a.getY() - b.getY());
+    }
+
+    /** Overall orientation of a segment as a value in [0, 180). */
+    /**
+     * Fibre orientation in [0,180). The y term is NEGATED because image y grows downward: without
+     * that, this returns the mirror of the angle the server reports for the same fibre (theta vs
+     * 180-theta), so a restrict-to-object run and an ordinary one disagreed about every angle --
+     * and a colour map of the two together showed two fanned populations where there is one.
+     */
+    private static double orientationDeg(Point2 a, Point2 b) {
+        double ang = Math.toDegrees(Math.atan2(-(b.getY() - a.getY()), b.getX() - a.getX()));
+        return ((ang % 180) + 180) % 180;
     }
 
     /**

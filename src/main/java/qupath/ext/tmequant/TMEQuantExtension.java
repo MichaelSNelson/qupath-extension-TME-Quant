@@ -44,6 +44,9 @@ public final class TMEQuantExtension implements QuPathExtension {
         installed = true;
         addMenuItems(qupath);
         registerPreferences(qupath);
+        // Cyclic colormaps for angle measurement maps, where 0 and 180 degrees are the SAME
+        // orientation and must get the same colour.
+        CyclicColorMaps.install();
     }
 
     private void addMenuItems(QuPathGUI qupath) {
@@ -60,10 +63,13 @@ public final class TMEQuantExtension implements QuPathExtension {
         MenuItem pingItem = new MenuItem("Ping fiber server");
         pingItem.setOnAction(e -> pingServer());
 
+        MenuItem selfTestItem = new MenuItem("Self-test fiber engine...");
+        selfTestItem.setOnAction(e -> EngineSelfTest.run(qupath));
+
         MenuItem launcherItem = new MenuItem("Configure fiber server launcher...");
         launcherItem.setOnAction(e -> ServerLauncher.configureLauncher(qupath));
 
-        menu.getItems().addAll(analyzeItem, tacsItem, pingItem, launcherItem);
+        menu.getItems().addAll(analyzeItem, tacsItem, pingItem, selfTestItem, launcherItem);
     }
 
     /** Surface the server launcher + auto-launch settings in QuPath's Preferences pane. */
@@ -80,6 +86,13 @@ public final class TMEQuantExtension implements QuPathExtension {
                     "Auto-launch fiber server", EXTENSION_NAME,
                     "When the TME Quant dialog opens and the server isn't reachable, automatically "
                             + "run the configured launcher above and wait for it to start.");
+            pane.addPropertyPreference(
+                    FiberSocketPreferences.maxTileDimProperty(), Double.class,
+                    "Max tile size (px)", EXTENSION_NAME,
+                    "Largest tile (analysed px per side) a region is split into for FIRE. Bigger = "
+                            + "fewer tiles (faster, fewer round-trips) but heavier per tile; a huge "
+                            + "region makes MORE tiles rather than giant ones. The Analyze dialog shows "
+                            + "the resulting physical tile size next to Downsample. Default 2048.");
         } catch (Exception ex) {
             // Non-fatal: the prefs are still persisted and settable via the menu item.
             logger.warn("Could not register TME Quant preferences in the Preferences pane", ex);
