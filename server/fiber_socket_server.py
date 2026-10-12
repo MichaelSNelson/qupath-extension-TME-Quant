@@ -55,7 +55,8 @@ The server replies with one length-prefixed JSON object:
           "angle": 170.4,                # degrees [0,180)
           "length_arc": 57.1,            # arc length (px)
           "length_end": 46.3,            # straight end-to-end length (px)
-          "width": 4.2,
+          "width": 4.2,              # mean width along the fibre (analysed px)
+          "width_median": 3.9,       # median; mean/median >> 1 flags a trace through junctions/blobs
           "straightness": 0.81,
           "tacs": null                   # populated only with a boundary mask
         }, ...
@@ -440,20 +441,30 @@ def _approx_width(fa_verts, Ra) -> float:
         return float("nan")
 
 
-def _width_stats(fa_verts, Ra):
-    """Fibre width stats over the fibre's vertices (each width = 2*distance-map radius), analysed px.
+def _width_fields(w):
+    """The width measurements every tracer reports, from the per-vertex widths `w` (analysed px).
 
-    Returns (mean, max, std). A fibre's thickness varies along its length, so a single mean hides
-    real variation — callers expose all three. NaNs when no valid vertices.
+    Mean AND median: the samples are skewed by junctions and blobs the trace passes through
+    (a junction doubles the local distance-map radius), so the mean overstates a clean fibre
+    while the median tracks its body; the ratio of the two flags a contaminated trace. `width`
+    stays the MEAN on every tracer -- it also drives the widMAX filter, which must mean the same
+    thing whichever tracer ran. NaNs when there are no samples.
     """
+    w = np.asarray(w, dtype=float).ravel()
+    if w.size == 0:
+        nan = float("nan")
+        return {"width": nan, "width_median": nan, "width_max": nan, "width_std": nan}
+    return {"width": float(np.mean(w)), "width_median": float(np.median(w)),
+            "width_max": float(np.max(w)), "width_std": float(np.std(w))}
+
+
+def _width_stats(fa_verts, Ra):
+    """Width fields (see `_width_fields`) over a FIRE fibre's vertices (width = 2*radius)."""
     try:
         idx = [v for v in fa_verts if 0 <= v < len(Ra)]
-        if not idx:
-            return float("nan"), float("nan"), float("nan")
-        w = 2.0 * np.asarray(Ra)[idx].astype(float)
-        return float(np.mean(w)), float(np.max(w)), float(np.std(w))
+        return _width_fields(2.0 * np.asarray(Ra)[idx].astype(float) if idx else [])
     except Exception:  # noqa: BLE001
-        return float("nan"), float("nan"), float("nan")
+        return _width_fields([])
 
 
 def _valley_cut_edges(pts, smooth, thr, valley_frac, win_px=12.0, step=1.0):
@@ -584,9 +595,7 @@ def _snap_to_centerline(fibers, image, thr, search_px=6, penalty=0.15, iters=3, 
             wv = 2.0 * dmap[np.clip(np.round(P[:, 1]).astype(int), 0, H - 1),
                             np.clip(np.round(P[:, 0]).astype(int), 0, W - 1)]
             if wv.size and float(wv.max()) > 0:
-                nf["width"] = float(np.mean(wv))
-                nf["width_max"] = float(np.max(wv))
-                nf["width_std"] = float(np.std(wv))
+                nf.update(_width_fields(wv))
             out.append(nf)
         except Exception as exc:  # noqa: BLE001 - never let refinement fail a tile
             logger.debug("centreline snap skipped a fibre (%s)", exc)
@@ -1073,8 +1082,6 @@ def _fibers_from_fire(data: dict, ll1: float) -> list:
         mid = path_rc[len(path_rc) // 2]
         center = [float(mid[1]), float(mid[0])]  # (x, y)
         fa_verts = Fa[i].get("v", []) if i < len(Fa) else []
-        width, width_max, width_std = _width_stats(fa_verts, Ra)
-
         fibers.append(
             {
                 "id": out_id,
@@ -1083,9 +1090,7 @@ def _fibers_from_fire(data: dict, ll1: float) -> list:
                 "angle": _angle_from_endpoints(p_start, p_end),
                 "length_arc": arc_len,
                 "length_end": end_len,
-                "width": width,              # MEAN width (also drives the widMAX filter)
-                "width_max": width_max,
-                "width_std": width_std,
+                **_width_stats(fa_verts, Ra),  # width (MEAN, drives widMAX), median, max, std
                 "straightness": straightness,
                 "tacs": None,
             }
@@ -2366,8 +2371,7 @@ def trace_flow(image, mask, parallel_px=17.0, coh_min=0.05, step=1.5, max_len=12
             "points": pl, "length_arc": arc, "length_end": end, "angle": ang,
             "straightness": straight,
             "center": [float(pts[len(pts) // 2, 0]), float(pts[len(pts) // 2, 1])],
-            "width": float(np.median(wid)), "width_max": float(wid.max()),
-            "width_std": float(wid.std()),
+            **_width_fields(wid),
         })
     for i, f in enumerate(out):
         f["id"] = i
@@ -2531,8 +2535,7 @@ def trace_centerlines(gray, thr, smooth_sigma=2.0, min_len_px=20.0, min_obj=60,
         fibers.append({
             "id": len(fibers), "points": pts_xy, "center": [mid[0], mid[1]], "angle": ang,
             "length_arc": arc, "length_end": end, "straightness": straight,
-            "width": float(np.mean(wv)), "width_max": float(np.max(wv)),
-            "width_std": float(np.std(wv)), "tacs": None,
+            **_width_fields(wv), "tacs": None,
         })
     return fibers
 
@@ -3126,6 +3129,7 @@ def analyze_synthetic(image: np.ndarray, meta: dict) -> list:
                     "length_arc": length,
                     "length_end": length,
                     "width": float("nan"),
+                    "width_median": float("nan"),
                     "straightness": 1.0,
                     "tacs": None,
                 }

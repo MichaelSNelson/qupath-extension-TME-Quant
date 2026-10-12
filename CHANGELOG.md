@@ -2,6 +2,42 @@
 
 ## 0.2.3
 
+**Width median alongside width mean, on every tracer.** A fibre's width samples are skewed by the
+junctions and blobs its trace passes through — a junction doubles the local distance-map radius — so
+the mean overstates a clean fibre while the median tracks its body, and the ratio flags a contaminated
+trace (29% of centreline fibres on the ground-truth box carried more than 20% skew). Every object now
+has `Width median` next to `Width mean`. This also removes an inconsistency: the Flow tracer was
+sending its *median* as `width` while FIRE and Centerline sent their *mean*, so the one column — and
+the Max fiber width filter built on it — meant different things depending on the tracer. `width` is
+the mean everywhere now; Flow users will see slightly larger `Width mean` values than before and the
+median they had under that name.
+
+**Two-pass relabelled for the dim-fibre use.** The mechanism always allowed the second threshold to be
+lower than the first — the spinner spans the full range — but the label and tooltips only described the
+higher setting (carving thick bundles). With the Flow tracer, a modest step DOWN is the useful direction:
+on the ground-truth box 77+70 raised recall from 48% to 51% at 98% of true length, while 77+55 reached
+60% recall but over-traced to 122%. The checkbox is now "Two-pass (second threshold)", the tooltips give
+both directions with that guidance, and the run status names which one is running.
+
+**Run ID now survives being stored.** The first run of the extension inside QuPath under an agent
+(the qupath-mcp action log driving the dialog and reading the detections back) showed two runs 80 s
+apart carrying the SAME `Run ID`, 20261011193856 — a value that was never a real stamp. QuPath keeps
+every measurement as a 32-bit float, whichever list type an object is created with, and a float holds
+integers exactly only below 16,777,216; near the old 14-digit `yyyyMMddHHmmss` ids it steps by
+2,097,152, so the hour, minute and second were rounded away and nothing in `runs.json` could ever
+match a detection. The id is now the run's start time in minutes since 2024-01-01 (exact until 2055;
+a run in the same minute as the previous one takes the next free value) and `runs.json` carries the
+full stamp. Objects made by 0.2.0–0.2.2 still carry the rounded ids and cannot be re-linked.
+
+**Batch: the overall tile count was wrong, and the log described the wrong run.** Found the same way.
+A whole-image batch showed "9 / 30 tiles" while it was running tile 9 of 64: the tiler clipped tiles
+against the dialog's own region origin, which at counting time was still the region the dialog was
+launched from, so tiles past the image edge *as measured from there* were dropped. The tiler now takes
+its origin and image size explicitly and the count matches the run. The batch log's `--- reproduce ---`
+block also carried the launch dialog's region and intensity scale rather than the batch's global
+scale; it now says so, and each region logs its actual `norm=` line as it starts.
+
+
 **The flow tracer is about twice as fast, with bit-identical output.** Profiling one tile put
 66% of the whole trace in `_flow_sample`: the walk reads three fields — coherence and the two
 direction components — at the SAME positions on every step, and was re-deriving the clip, the

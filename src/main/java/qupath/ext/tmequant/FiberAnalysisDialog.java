@@ -556,23 +556,30 @@ public final class FiberAnalysisDialog {
             updateThresholdFeedback();
             redrawMask(); // live threshold mask update (no server / no FIRE)
         });
-        // Two-pass detection: a 2nd, higher-threshold pass carves thick bright bundles so their
-        // internal striations trace along the bundle instead of across it. Merged + de-duped.
-        twoPassCheck = new CheckBox("Two-pass (thin + thick bundles)");
+        // Two-pass detection: a 2nd pass at another threshold, merged + de-duped with the first.
+        // The 2nd threshold may be HIGHER (carve thick bright bundles so their internal striations
+        // trace along the bundle -- the original FIRE use) or LOWER (pick up dim fibres beside bright
+        // ones: measured on the GT box with the Flow tracer, 77+70 raised recall 48->51% at 98%
+        // length; 77+55 reached 60% recall but over-traced to 122% length -- so a modest step down).
+        twoPassCheck = new CheckBox("Two-pass (second threshold)");
         twoPassCheck.setWrapText(true);
         twoPassCheck.setTooltip(ttip(
-                "Run detection TWICE and merge. Pass 1 uses the Background threshold above (thin, "
-                        + "faint fibres). Pass 2 uses the higher '2nd-pass threshold' to carve thick "
-                        + "bright bundles, so their internal vertical striations become traceable ridges "
-                        + "(instead of FIRE tracing across the bundle). The two fibre sets are merged and "
-                        + "de-duplicated. Slower (two full runs). TACS is ignored in two-pass mode."));
+                "Run detection TWICE and merge: pass 1 at the Background threshold above, pass 2 at "
+                        + "the '2nd-pass threshold'. The two fibre sets are merged and de-duplicated.\n"
+                        + "LOWER 2nd threshold: picks up DIM fibres that sit next to bright ones, which "
+                        + "pass 1 misses (a small step down adds recall; a large one over-traces).\n"
+                        + "HIGHER 2nd threshold: carves thick bright bundles so their internal striations "
+                        + "become traceable ridges instead of FIRE tracing across the bundle.\n"
+                        + "Slower (two full runs). TACS is ignored in two-pass mode."));
         secondThresholdSpinner = spinnerD(statMin, statMax,
                 Math.min(statMax, defaultThreshold() * 2.0), step);
         secondThresholdSpinner.setTooltip(ttip(
-                "The HIGHER background threshold for pass 2 (thick bundles). Raise it until a solid "
-                        + "bright bundle breaks into its internal vertical striations in the ① threshold "
-                        + "preview — that's when FIRE can trace along the bundle. Must be higher than the "
-                        + "main Background threshold. Only used when 'Two-pass' is ticked."));
+                "Background threshold for pass 2; either side of the main threshold works.\n"
+                        + "LOWER (dim fibres): start ~10% below the main threshold and watch the ① mask "
+                        + "— when background texture starts to join up, you've gone too far.\n"
+                        + "HIGHER (thick bundles): raise it until a solid bright bundle breaks into its "
+                        + "internal striations in the ① preview.\n"
+                        + "Only used when 'Two-pass' is ticked."));
         secondThresholdSpinner.disableProperty().bind(twoPassCheck.selectedProperty().not());
         ridgeCheck = new CheckBox("Ridge enhancement (experimental)");
         ridgeCheck.setWrapText(true);
@@ -3478,7 +3485,11 @@ public final class FiberAnalysisDialog {
                     if (tileCountOut != null && analysisDown > 0) {
                         int rwA = (int) Math.ceil(pw / analysisDown);
                         int rhA = (int) Math.ceil(ph / analysisDown);
-                        tileCountOut[0] += computeTiles(rwA, rhA, analysisDown).size();
+                        int nTiles = computeTiles(rwA, rhA, analysisDown, px, py,
+                                srv.getWidth(), srv.getHeight()).size();
+                        logger.info("Batch tile count: {} region {}x{} @ds{} -> {} tiles",
+                                safeName(entry), rwA, rhA, analysisDown, nTiles);
+                        tileCountOut[0] += nTiles;
                     }
                     int statDown = Math.max(1, (int) Math.ceil(Math.max(pw, ph) / 256.0));
                     BufferedImage cr = srv.readRegion(
@@ -3799,9 +3810,15 @@ public final class FiberAnalysisDialog {
         }
         final double batchRunId = FiberObjectBuilder.runIdFromStamp(logStamp);
         FiberObjectBuilder.setRunId(batchRunId);
-        RunLog.appendRunIndex(logDir, logStamp, batchRunId, runSettingsBlock());
+        // The reproduce block is built from the dialog, whose region and intensity scale are the
+        // ones it was LAUNCHED from -- not what the batch runs: the batch computes one scale over
+        // all its images and swaps the region per image. Say so, and log each region's real
+        // norm= line as it starts, or the block reads as a reproduction recipe and is the wrong one.
+        final String batchNote = "batch=true (the norm= line above is the launch dialog's region; "
+                + "each region's actual norm= is logged as it starts)";
+        RunLog.appendRunIndex(logDir, logStamp, batchRunId, runSettingsBlock() + "\n" + batchNote);
         final RunLog runLog = RunLog.open(logDir, "fiber-run-" + logStamp + "-client.txt", "Batch",
-                String.join("\n", runSettingsBlock(),
+                String.join("\n", runSettingsBlock(), batchNote,
                         "Batch run: " + entries.size() + " image(s)",
                         "Region mode: " + mode
                                 + (mode == ScopeSection.RegionMode.CLASS_ANNOTATIONS
@@ -3945,6 +3962,7 @@ public final class FiberAnalysisDialog {
                             final String rTag = nm + " r" + regionNum + "/" + regs.size();
                             runLog.line(rTag + ": starting (region px x=" + rx + " y=" + ry
                                     + " w=" + rw + " h=" + rh + ")");
+                            runLog.line(rTag + ": norm=" + normBlock(downsample));
                             AnalyzeResult res = analyzeFull(channel, downsample, false, null, extra,
                                     m -> {
                                         prog.detail(si, m);
@@ -5224,9 +5242,9 @@ public final class FiberAnalysisDialog {
     }
 
     /**
-     * Detect a region, optionally in TWO passes and merged: pass 1 at the current threshold (thin,
-     * faint fibres), pass 2 at the higher "2nd-pass threshold" (carves thick bright bundles so their
-     * internal vertical striations become traceable ridges). The union is deduped + stitched once.
+     * Detect a region, optionally in TWO passes and merged: pass 1 at the current threshold, pass 2
+     * at the "2nd-pass threshold" -- lower to pick up dim fibres beside bright ones, higher to carve
+     * thick bright bundles into traceable striations. The union is deduped + stitched once.
      * When two-pass is off this is exactly {@link #analyzeFull} (single pass), so nothing changes.
      * Two-pass runs both passes with TACS OFF (v1); a boundary is ignored.
      */
@@ -5238,12 +5256,13 @@ public final class FiberAnalysisDialog {
         }
         double t1 = thresholdSpinner.getValue();
         double t2 = secondThresholdSpinner.getValue();
-        status.accept(String.format("Two-pass 1/2 — thin fibres (threshold %s)…", trimNum(t1)));
+        status.accept(String.format("Two-pass 1/2 — main threshold %s…", trimNum(t1)));
         AnalyzeResult a = analyzeFull(channel, d, false, null, extra, status, tileSink);
         thresholdOverride = t2;
         AnalyzeResult b;
         try {
-            status.accept(String.format("Two-pass 2/2 — thick bundles (threshold %s)…", trimNum(t2)));
+            status.accept(String.format("Two-pass 2/2 — %s threshold %s…",
+                    t2 < t1 ? "lower (dim fibres)" : "higher (thick bundles)", trimNum(t2)));
             b = analyzeFull(channel, d, false, null, extra, status, tileSink);
         } finally {
             thresholdOverride = null;
@@ -5903,6 +5922,18 @@ public final class FiberAnalysisDialog {
 
     /** Split the region (in analysed pixels) into overlapping tiles. */
     private List<Tile> computeTiles(int rwA, int rhA, double d) {
+        return computeTiles(rwA, rhA, d, rx, ry, server.getWidth(), server.getHeight());
+    }
+
+    /**
+     * The tiling of a {@code rwA x rhA} analysed-px region whose full-res origin is
+     * {@code (originX, originY)} on an image {@code imgW x imgH}. Explicit so a caller that is not
+     * looking at the dialog's own region -- the batch counting tiles for its ETA before the
+     * context swap -- gets the same grid the run will use. Clipping against the dialog's region
+     * origin instead counted a 10320x7720 whole image as 30 tiles and then ran 64.
+     */
+    private List<Tile> computeTiles(int rwA, int rhA, double d, int originX, int originY,
+            int imgW, int imgH) {
         int nCols = Math.max(1, (int) Math.ceil((double) rwA / TILE_CORE));
         int nRows = Math.max(1, (int) Math.ceil((double) rhA / TILE_CORE));
         // Keep the tile COUNT under MAX_TILES by growing tiles -- but never past the effective per-
@@ -5938,10 +5969,10 @@ public final class FiberAnalysisDialog {
                 int readX1 = Math.min(rwA, coreX1 + TILE_OVERLAP);
                 int readY0 = Math.max(0, coreY0 - TILE_OVERLAP);
                 int readY1 = Math.min(rhA, coreY1 + TILE_OVERLAP);
-                int fullX = rx + (int) Math.round(readX0 * d);
-                int fullY = ry + (int) Math.round(readY0 * d);
-                int fullW = Math.min(server.getWidth() - fullX, (int) Math.round((readX1 - readX0) * d));
-                int fullH = Math.min(server.getHeight() - fullY, (int) Math.round((readY1 - readY0) * d));
+                int fullX = originX + (int) Math.round(readX0 * d);
+                int fullY = originY + (int) Math.round(readY0 * d);
+                int fullW = Math.min(imgW - fullX, (int) Math.round((readX1 - readX0) * d));
+                int fullH = Math.min(imgH - fullY, (int) Math.round((readY1 - readY0) * d));
                 if (fullW <= 0 || fullH <= 0) {
                     continue;
                 }

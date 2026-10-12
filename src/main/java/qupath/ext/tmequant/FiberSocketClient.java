@@ -367,6 +367,8 @@ public final class FiberSocketClient {
         public double lengthEnd;
 
         public double width; // MEAN width (analysed px); also drives the widMAX filter
+        @SerializedName("width_median")
+        public double widthMedian = Double.NaN; // median width along the fibre (analysed px)
         @SerializedName("width_max")
         public double widthMax = Double.NaN; // max width along the fibre (analysed px)
         @SerializedName("width_std")

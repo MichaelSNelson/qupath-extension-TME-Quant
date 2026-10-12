@@ -46,29 +46,58 @@ public final class FiberObjectBuilder {
      * Identifier of the run currently writing objects, stamped onto every one as a "Run ID"
      * measurement so a detection can be traced back to the settings that produced it.
      *
-     * <p>The value is the run's timestamp as {@code yyyyMMddHHmmss} (e.g. 20261004164500): unique,
-     * chronologically sortable, and it names the matching log pair in
-     * {@code <project>/logs/fiber-analysis/}. 0 means "not set" and no measurement is written.</p>
+     * <p>The value is the run's start time in MINUTES since 2024-01-01 00:00 local (about 1.47
+     * million in late 2026), and {@code runs.json} maps it to the full stamp, settings and log
+     * pair in {@code <project>/logs/fiber-analysis/}. 0 means "not set" and no measurement is
+     * written.</p>
+     *
+     * <p>Why not the readable {@code yyyyMMddHHmmss}? QuPath stores every measurement as a
+     * 32-bit float -- the "double" list type included -- and a float has 24 bits of mantissa:
+     * integers are exact only below 16,777,216. Near 2e13 the spacing is 2,097,152, so two
+     * runs a day apart read back as the SAME id and neither matched the exact value in
+     * runs.json (found by reading the ids back through QuPath). Minutes since 2024 stay exact
+     * until 2055. A run starting in the same minute as the previous one in this session takes
+     * the next free value, so ids are unique per session; the index carries the real stamp.</p>
      *
      * <p>Static because a run is a single sequential pass on one background thread, and threading
      * it through every call site buys nothing; set it with {@link #setRunId} around a run.</p>
      */
     private static volatile double runId = 0.0;
 
+    /** Largest integer a float holds exactly; a run id must stay below it to survive storage. */
+    public static final double MAX_EXACT_FLOAT = 16_777_216.0;
+
+    private static final java.time.LocalDateTime RUN_ID_EPOCH =
+            java.time.LocalDateTime.of(2024, 1, 1, 0, 0);
+    private static final java.time.format.DateTimeFormatter STAMP_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+    private static long lastIssuedRunId = 0;
+
     /** Stamp this run id onto every object built from now on; 0 disables. */
     public static void setRunId(double id) {
         runId = id;
     }
 
-    /** Parse a {@code yyyyMMdd-HHmmss} run stamp into the numeric id, or 0 if it does not parse. */
-    public static double runIdFromStamp(String stamp) {
+    /**
+     * Turn a {@code yyyyMMdd-HHmmss} run stamp into the numeric id (minutes since 2024-01-01,
+     * bumped past the previous id of this session if it would repeat), or 0 if it does not parse.
+     */
+    public static synchronized double runIdFromStamp(String stamp) {
         if (stamp == null) {
             return 0.0;
         }
-        String digits = stamp.replaceAll("[^0-9]", "");
         try {
-            return digits.length() == 14 ? Double.parseDouble(digits) : 0.0;
-        } catch (NumberFormatException e) {
+            var t = java.time.LocalDateTime.parse(stamp.trim(), STAMP_FORMAT);
+            long minutes = java.time.Duration.between(RUN_ID_EPOCH, t).toMinutes();
+            if (minutes <= 0 || minutes >= MAX_EXACT_FLOAT) {
+                return 0.0;
+            }
+            if (minutes <= lastIssuedRunId) {
+                minutes = lastIssuedRunId + 1;
+            }
+            lastIssuedRunId = minutes;
+            return (double) minutes;
+        } catch (java.time.format.DateTimeParseException e) {
             return 0.0;
         }
     }
@@ -279,8 +308,17 @@ public final class FiberObjectBuilder {
      */
     private static void putWidths(qupath.lib.measurements.MeasurementList ml,
                                   FiberSocketClient.Fiber f, String lenUnit, double toUnit) {
+        // Mean AND median: a fibre's width samples are skewed by junctions and blobs the trace
+        // passes through, so the mean overstates a clean fibre while the median tracks its body.
+        // Mean/median well above 1 flags a contaminated trace (29% of centreline fibres on the GT
+        // box had >20% skew); for a clean fibre the two agree. Every tracer reports both now --
+        // before, Flow sent its median as "width" and the others their mean, so the one column
+        // meant different things depending on the tracer.
         if (!Double.isNaN(f.width)) {
             ml.put("Width mean (" + lenUnit + ")", f.width * toUnit);
+        }
+        if (!Double.isNaN(f.widthMedian)) {
+            ml.put("Width median (" + lenUnit + ")", f.widthMedian * toUnit);
         }
         if (!Double.isNaN(f.widthMax)) {
             ml.put("Width max (" + lenUnit + ")", f.widthMax * toUnit);
