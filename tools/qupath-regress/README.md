@@ -15,7 +15,10 @@ python3 regress.py --record           # after an intended change: rewrite expect
 ```
 
 A run takes about 6 minutes and ends with `8/8 passed`, or a list of scenarios with the field that
-changed in each (`dialog.n: 88 -> 97`).
+changed in each (`dialog.n: 88 -> 97`). For each failed scenario it also saves every open QuPath window
+(the dialog and the viewer) as PNGs in `$REGRESS_DIR/failures/<date>-<time>/`, plus a text outline
+of the open TME Quant dialogs with every control's value (a screenshot shows only the scrolled-to part),
+and lists the files. The main-window PNG is several MB on a HiDPI screen; nothing is saved for a pass.
 
 ## Scenarios
 

@@ -439,6 +439,41 @@ return groovy.json.JsonOutput.toJson(p.getImageList().collectEntries { e ->
     return {"counts": counts, "summary": text}, fails
 
 
+def snap_failure(q, name, run_dir):
+    """Save every open QuPath window (dialogs and the viewer) as they are when a scenario fails.
+
+    Uses qupath-mcp's snap() helper, which writes full-size PNGs to its own folder
+    (-Dqupath.driver.out, else the JVM temp dir); they are moved into this run's folder.
+    """
+    import shutil
+    try:
+        paths = json.loads(q.groovy(f'''def files = snap("{name}")
+return groovy.json.JsonOutput.toJson(files.collect {{ it.getAbsolutePath() }})''')[0])
+    except Exception as ex:  # noqa: BLE001 - evidence is best effort; never mask the failure
+        return [f"(could not snap: {ex})"]
+    os.makedirs(run_dir, exist_ok=True)
+    kept = []
+    # The screenshots show only the part of a scrolling dialog that is in view; the text outline has
+    # every control and its value, for a few KB.
+    for title in (DIALOG, BATCH):
+        try:
+            text = q.call("qupath_describe", window=title, limit=500)
+        except RuntimeError:
+            continue
+        dest = os.path.join(run_dir, f"{name}-{title.replace(' ', '_')}.txt")
+        with open(dest, "w") as f:
+            f.write(text)
+        kept.append(dest)
+    for p in paths:
+        dest = os.path.join(run_dir, os.path.basename(p))
+        try:
+            shutil.move(p, dest)
+            kept.append(dest)
+        except OSError:
+            kept.append(p)
+    return kept
+
+
 def log_lines_since(mark):
     with open(CONFIG["qupath_log"], errors="replace") as f:
         return f.readlines()[mark:]
@@ -527,6 +562,7 @@ def main():
 
     open_image(q)
     results, failed = {}, []
+    run_dir = os.path.join(CONFIG["workdir"], "failures", time.strftime("%Y%m%d-%H%M%S"))
     for name in names:
         t0 = time.monotonic()
         print(f"--- {name}: {SCENARIOS[name].__doc__.strip()}")
@@ -534,6 +570,8 @@ def main():
             fp, fails = SCENARIOS[name](q)
         except Exception as ex:  # noqa: BLE001 - report and carry on with the next scenario
             fp, fails = None, [f"error: {ex}"]
+            for path in snap_failure(q, name, run_dir):
+                fails.append(f"saved: {path}")
             close_dialogs(q)
             try:
                 open_image(q)
@@ -545,6 +583,9 @@ def main():
                 fails.append("fingerprint changed: " + "; ".join(diff(expected[name], fp)))
             elif not a.record and name not in expected:
                 print("     (no recorded fingerprint; run with --record to add it)")
+        if fails and not any(m.startswith("saved: ") for m in fails):
+            for path in snap_failure(q, name, run_dir):
+                fails.append(f"saved: {path}")
         status = "FAIL" if fails else "ok"
         print(f"     {status} in {time.monotonic() - t0:.0f}s")
         for m in fails:
