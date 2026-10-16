@@ -245,27 +245,43 @@ public final class FiberEngine {
     /** ~2.56 MP: below this a region is sampled at the selected downsample (matches the dialog). */
     private static final long PREVIEW_FAITHFUL_MAX_PX = 2_560_000L;
 
-    /**
-     * {normLo, normHi} for a region: min and 99.5th-percentile white point of the channel — matching
-     * {@code FiberAnalysisDialog.computeStats}. Samples at the selected downsample {@code d} when the
-     * region is small enough to read faithfully (so normHi is exactly what FIRE sees), else at a
-     * coarser bounded resolution for a huge region.
-     */
+    /** {normLo, normHi} for a region; see {@link #computeRegionNorm(ImageServer, int, int, int, int, int, double, double)}. */
     public static double[] computeRegionNorm(ImageServer<BufferedImage> server, int channel,
             int rx, int ry, int rw, int rh, double d) throws Exception {
+        double[] n = computeRegionNorm(server, channel, rx, ry, rw, rh, d, Double.NaN);
+        return new double[] {n[0], n[1]};
+    }
+
+    /**
+     * {normLo, normHi, collagenLevel} for a region, sampled exactly as
+     * {@code FiberAnalysisDialog.computeStats} samples it: the whole region at the analysis
+     * downsample when it fits a faithful preview, else a central ~1600 analysed-px patch at that
+     * downsample (coarsening the whole region instead averages thin bright collagen into the dark
+     * around it and pulls the white point down). normLo is the minimum, normHi the 99.5th
+     * percentile, and collagenLevel the 99.9th percentile of the pixels above {@code threshold}
+     * (0 when it is NaN or too few pixels are above it), which the white point must cover.
+     */
+    public static double[] computeRegionNorm(ImageServer<BufferedImage> server, int channel,
+            int rx, int ry, int rw, int rh, double d, double threshold) throws Exception {
         long analysedPx = (long) Math.ceil(rw / d) * (long) Math.ceil(rh / d);
-        int statDown = analysedPx <= PREVIEW_FAITHFUL_MAX_PX
-                ? Math.max(1, (int) Math.ceil(d))
-                : Math.max(1, (int) Math.ceil(Math.max(rw, rh) / 1600.0));
-        RegionRequest req = RegionRequest.createInstance(server.getPath(), statDown, rx, ry, rw, rh);
+        int statDown = Math.max(1, (int) Math.ceil(d));
+        int srx = rx, sry = ry, srw = rw, srh = rh;
+        if (analysedPx > PREVIEW_FAITHFUL_MAX_PX) {
+            int patchFull = Math.max(1, (int) Math.round(1600.0 * d));
+            srw = Math.min(rw, patchFull);
+            srh = Math.min(rh, patchFull);
+            srx = rx + (rw - srw) / 2;
+            sry = ry + (rh - srh) / 2;
+        }
+        RegionRequest req = RegionRequest.createInstance(server.getPath(), statDown, srx, sry, srw, srh);
         BufferedImage cr = server.readRegion(req);
         if (cr == null) {
-            return new double[] {0, 255};
+            return new double[] {0, 255, 0};
         }
         double[] s = ChannelExtractor.channelSamples(cr, channel);
         double[] f = java.util.Arrays.stream(s).filter(Double::isFinite).toArray();
         if (f.length == 0) {
-            return new double[] {0, 255};
+            return new double[] {0, 255, 0};
         }
         double[] sorted = f.clone();
         java.util.Arrays.sort(sorted);
@@ -275,7 +291,16 @@ public final class FiberEngine {
         if (normHi <= normLo) {
             normHi = statMax > normLo ? statMax : normLo + 1.0;
         }
-        return new double[] {normLo, normHi};
+        return new double[] {normLo, normHi, brightCollagenLevel(sorted, threshold)};
+    }
+
+    /** 99.9th percentile of the samples above {@code threshold}; 0 when there are too few (dialog rule). */
+    static double brightCollagenLevel(double[] sorted, double threshold) {
+        if (Double.isNaN(threshold) || sorted.length < 64) {
+            return 0.0;
+        }
+        double[] above = java.util.Arrays.stream(sorted).filter(v -> v > threshold).toArray();
+        return above.length < 32 ? 0.0 : percentile(above, 0.999);
     }
 
     // --- The detection loop (verbatim core of FiberAnalysisDialog.analyzeFull) --------------------
@@ -289,13 +314,22 @@ public final class FiberEngine {
             ImageServer<BufferedImage> server, int channel, int rx, int ry, int rw, int rh,
             FiberParams p, boolean calibrated, double pixelSizeMicrons, double normLo, double normHi,
             ROI restrictRoi, Consumer<String> log) throws Exception {
+        return analyzeRegion(host, port, server, channel, rx, ry, rw, rh, p, calibrated,
+                pixelSizeMicrons, normLo, normHi, 0.0, restrictRoi, log);
+    }
+
+    /** As above, with the region's bright-collagen level from {@link #computeRegionNorm} (index 2). */
+    public static AnalyzeResult analyzeRegion(String host, int port,
+            ImageServer<BufferedImage> server, int channel, int rx, int ry, int rw, int rh,
+            FiberParams p, boolean calibrated, double pixelSizeMicrons, double normLo, double normHi,
+            double collagenLevel, ROI restrictRoi, Consumer<String> log) throws Exception {
         double d = p.downsample;
         int rwA = (int) Math.ceil(rw / d);
         int rhA = (int) Math.ceil(rh / d);
         List<Tile> tiles = computeTiles(rx, ry, rwA, rhA, server.getWidth(), server.getHeight(), d);
         String detMeta = p.buildDetectMeta(rx, ry, rw, rh, d, calibrated, pixelSizeMicrons,
-                normLo, normHi, null, null);
-        double serverNormHi = p.serverNormHi(normLo, normHi);
+                normLo, normHi, collagenLevel, null, null);
+        double serverNormHi = p.whitePoint(normLo, normHi, collagenLevel);
         logProgress(log, String.format(
                 "TME-Quant: region %dx%d @(%d,%d) downsample=%s -> %d analysed px -> %d tile(s)",
                 rw, rh, rx, ry, trim(d), rwA * rhA, tiles.size()));

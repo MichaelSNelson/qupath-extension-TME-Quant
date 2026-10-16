@@ -143,9 +143,10 @@ public final class TMEQuant {
                 ROI restrict = (p.maskToObject && roi.isArea()) ? roi : null;
 
                 double[] norm = FiberEngine.computeRegionNorm(server, p.channel, rx, ry, rw, rh,
-                        p.downsample);
+                        p.downsample, p.threshold);
                 FiberEngine.AnalyzeResult res = FiberEngine.analyzeRegion(host, port, server,
-                        p.channel, rx, ry, rw, rh, p, calibrated, pix, norm[0], norm[1], restrict, log);
+                        p.channel, rx, ry, rw, rh, p, calibrated, pix, norm[0], norm[1], norm[2],
+                        restrict, log);
 
                 List<PathObject> objects = FiberObjectBuilder.build(res.fibers, rx, ry, p.downsample,
                         pix, roi.getImagePlane(), p.createDetections, fiberClass, restrict,

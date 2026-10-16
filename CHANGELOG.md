@@ -2,6 +2,24 @@
 
 ## 0.2.3
 
+**The dialog used the intensity scale of the downsample it was opened at.** Changing **Downsample** in an
+open dialog re-read the preview but not the statistics behind it, so a run kept the black point, white
+point and bright-collagen sample of the previous downsample. Opened at 2 and run at 1, one 1600 px region
+was sent `thresh_im2` 68 instead of 73 and traced 97 FIRE fibres instead of 88. The statistics are now
+recomputed when the downsample changes, keeping your threshold as a region change does.
+
+**The scripting API now normalises exactly as the dialog does.** `TMEQuant.detectFibers` left out the
+bright-collagen floor of the white point (on the region above it sent `thresh_im2` 103 instead of 73, and
+found 89 fibres) and coarsened large regions where the dialog reads a central patch at the analysis
+downsample. On that region the two now agree on every fibre.
+
+Both were found by a new end-to-end suite, `tools/qupath-regress/`, which drives the dialog, the batch
+dialog and the scripting API inside a real QuPath and compares the resulting objects with recorded
+fingerprints. It also confirmed, inside QuPath: Flow and Centerline with Parallel tiles 4 equal serial;
+FIRE ignores the setting without timing out; restrict-to-object leaves fibres inside the object
+unchanged; TACS; a two-image batch; and a 35,672-fibre whole-image run through the blocked post-process
+(the size that used to fail with "Unreasonable response length").
+
 **Width median alongside width mean, on every tracer.** A fibre's width samples are skewed by the
 junctions and blobs its trace passes through — a junction doubles the local distance-map radius — so
 the mean overstates a clean fibre while the median tracks its body, and the ratio flags a contaminated

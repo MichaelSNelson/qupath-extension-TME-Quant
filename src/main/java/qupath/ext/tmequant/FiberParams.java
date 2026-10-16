@@ -213,20 +213,40 @@ public final class FiberParams {
 
     /** White point for the image SENT to FIRE, floored so thresh_im2 never saturates. */
     static double serverNormHi(double threshold, double lo, double hi) {
+        return serverNormHi(threshold, lo, hi, 0.0);
+    }
+
+    /**
+     * As the dialog's {@code serverNormHi}: the white point also covers {@code collagenLevel}, the
+     * 99.9th percentile of the region's above-threshold pixels (see
+     * {@link FiberEngine#brightCollagenLevel}), so bright bundles keep their internal gradient instead
+     * of clipping to 255. Without it the headless path sent a lower white point and therefore a
+     * HIGHER thresh_im2 than the dialog for the same native threshold (103 vs 68 on one region).
+     */
+    static double serverNormHi(double threshold, double lo, double hi, double collagenLevel) {
         double floor = lo + (threshold - lo) * (255.0 / MAX_SERVER_IM2);
-        return Math.max(hi, floor);
+        return Math.max(hi, Math.max(floor, collagenLevel));
     }
 
     /** thresh_im2 for the SENT image, using the floored white point (so it never saturates). */
     static int serverThreshIm2(double threshold, double lo, double hi) {
-        double eh = serverNormHi(threshold, lo, hi);
+        return serverThreshIm2(threshold, lo, hi, 0.0);
+    }
+
+    static int serverThreshIm2(double threshold, double lo, double hi, double collagenLevel) {
+        double eh = serverNormHi(threshold, lo, hi, collagenLevel);
         double range = eh > lo ? eh - lo : 1.0;
         return clamp((int) Math.round((threshold - lo) / range * 255.0), 0, 255);
     }
 
     /** White point for gray conversion (same as the dialog's {@code serverNormHi()}). */
     public double serverNormHi(double normLo, double normHi) {
-        return serverNormHi(threshold, normLo, normHi);
+        return serverNormHi(threshold, normLo, normHi, 0.0);
+    }
+
+    /** As {@link #serverNormHi(double, double)}, covering the region's bright collagen too. */
+    public double whitePoint(double normLo, double normHi, double collagenLevel) {
+        return serverNormHi(threshold, normLo, normHi, collagenLevel);
     }
 
     /**
@@ -236,7 +256,14 @@ public final class FiberParams {
      */
     public String buildDetectMeta(int rx, int ry, int rw, int rh, double ds, boolean calibrated,
             double pix, double normLo, double normHi, String logDir, String logFile) {
-        int threshIm2 = serverThreshIm2(threshold, normLo, normHi);
+        return buildDetectMeta(rx, ry, rw, rh, ds, calibrated, pix, normLo, normHi, 0.0, logDir, logFile);
+    }
+
+    /** As above, with the region's bright-collagen level in the white point, as the dialog does. */
+    public String buildDetectMeta(int rx, int ry, int rw, int rh, double ds, boolean calibrated,
+            double pix, double normLo, double normHi, double collagenLevel, String logDir,
+            String logFile) {
+        int threshIm2 = serverThreshIm2(threshold, normLo, normHi, collagenLevel);
         int ll1 = Math.max(1, (int) Math.round(toAnalysedPx(minLengthUnit, ds, calibrated, pix)));
         double distPx = toAnalysedPx(tacsZoneUm, ds, calibrated, pix);
 

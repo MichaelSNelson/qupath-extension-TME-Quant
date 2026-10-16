@@ -1,0 +1,148 @@
+{
+  "batch_two_images": {
+    "counts": {
+      "liver_a": 69,
+      "liver_b": 66
+    },
+    "summary": "2 / 2 image(s), 135 fibre(s) written"
+  },
+  "centerline_parallel": {
+    "classes": {
+      "Fiber": 146
+    },
+    "n": 146,
+    "roi_length": 20999.45,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 15492.66,
+      "Curvature (deg/um)": 1714.72,
+      "Length (um)": 3622.4,
+      "Straightness": 127.76,
+      "Width mean (um)": 380.09,
+      "Width median (um)": 372.68
+    }
+  },
+  "fire_parallel_requested": {
+    "classes": {
+      "Fiber": 88
+    },
+    "n": 88,
+    "roi_length": 23436.54,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 9315.12,
+      "Curvature (deg/um)": 1516.59,
+      "Length (um)": 4042.8,
+      "Straightness": 80.75,
+      "Width mean (um)": 98.5,
+      "Width median (um)": 60.51
+    }
+  },
+  "flow_parallel": {
+    "classes": {
+      "Fiber": 123
+    },
+    "n": 123,
+    "roi_length": 19294.25,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 12924.5,
+      "Curvature (deg/um)": 1096.71,
+      "Length (um)": 3328.26,
+      "Straightness": 113.73,
+      "Width mean (um)": 200.5,
+      "Width median (um)": 196.06
+    }
+  },
+  "headless_vs_dialog": {
+    "dialog": {
+      "classes": {
+        "Fiber": 88
+      },
+      "n": 88,
+      "roi_length": 23436.54,
+      "run_ids": 1,
+      "sums": {
+        "Angle (deg)": 9315.12,
+        "Curvature (deg/um)": 1516.59,
+        "Length (um)": 4042.8,
+        "Straightness": 80.75,
+        "Width mean (um)": 98.5,
+        "Width median (um)": 60.51
+      }
+    },
+    "headless": {
+      "classes": {
+        "Fiber": 88
+      },
+      "n": 88,
+      "roi_length": 23436.54,
+      "run_ids": 1,
+      "sums": {
+        "Angle (deg)": 9315.12,
+        "Curvature (deg/um)": 1516.59,
+        "Length (um)": 4042.8,
+        "Straightness": 80.75,
+        "Width mean (um)": 98.5,
+        "Width median (um)": 60.51
+      }
+    }
+  },
+  "large_postprocess": {
+    "blocked": "Post-process in blocks: 35672 fibres, 2x1 grid of 5160x7720 analysed px, 2 passes",
+    "classes": {
+      "Fiber": 35583
+    },
+    "n": 35583,
+    "passes": [
+      "Post-process pass 1/2: 35672 -> 35587 fibres over 2 block(s)",
+      "Post-process pass 2/2: 35587 -> 35583 fibres over 6 block(s)"
+    ],
+    "roi_length": 1831729.18,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 3271086.02,
+      "Curvature (deg/um)": 418521.19,
+      "Length (um)": 315973.28,
+      "Straightness": 32257.06,
+      "Width mean (um)": 155188.0,
+      "Width median (um)": 146996.84
+    }
+  },
+  "restrict_to_object": {
+    "classes": {
+      "Fiber": 50
+    },
+    "n": 50,
+    "restrict_inner": 37,
+    "roi_length": 7828.07,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 5053.21,
+      "Curvature (deg/um)": 401.63,
+      "Length (um)": 1350.34,
+      "Straightness": 47.54,
+      "Width mean (um)": 78.03,
+      "Width median (um)": 75.69
+    }
+  },
+  "tacs": {
+    "classes": {
+      "Fiber": 110,
+      "TACS-1": 41,
+      "TACS-2": 38,
+      "TACS-3": 32
+    },
+    "n": 221,
+    "roi_length": 36374.84,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 23549.37,
+      "Curvature (deg/um)": 1993.39,
+      "Length (um)": 6274.66,
+      "Straightness": 203.92,
+      "Width mean (um)": 378.9,
+      "Width median (um)": 372.1
+    }
+  }
+}

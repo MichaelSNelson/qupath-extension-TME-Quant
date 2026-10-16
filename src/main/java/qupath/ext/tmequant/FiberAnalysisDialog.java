@@ -614,6 +614,12 @@ public final class FiberAnalysisDialog {
             previewZoom = 1.0; // the preview image resizes with downsample; reset zoom/scroll so the
                                // retained pan doesn't park the view off the (now differently-sized) image
             updateTileSizeLabel(); // physical tile size scales with downsample
+            // The stats are sampled AT the analysis downsample, so they are stale after a change:
+            // without this a run used the black/white point and collagen sample of whatever
+            // downsample the dialog opened at (found as dialog-vs-headless thresh_im2 68 vs 103 on
+            // the same region). Keep the user's native threshold, as a region change does.
+            computeStats(chosenChannel());
+            applyStatsToThresholdSpinner(false);
             refreshBackground();
         });
         // min length default: ~15 um if calibrated, else 30 px
