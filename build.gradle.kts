@@ -1,5 +1,6 @@
 plugins {
-    // Create a shadow/fat jar that bundles non-core dependencies (gson).
+    // Builds the -all.jar that gets installed. Today it bundles nothing beyond our own
+    // classes: every dependency below is supplied by QuPath.
     id("com.gradleup.shadow") version "8.3.5"
     // QuPath Gradle extension convention plugin (from the settings plugin).
     id("qupath-conventions")
@@ -34,9 +35,15 @@ dependencies {
     shadow(libs.bundles.qupath)
     shadow(libs.bundles.logging)
     shadow(libs.qupath.fxtras)
-    // gson is used to (de)serialise the socket JSON. Bundle it so the jar is
-    // self-contained even if a given QuPath build does not ship it.
+    // gson (de)serialises the socket JSON. QuPath ships it, so it is not bundled:
+    // the `shadow` configuration means "provided at runtime", not "packed into the jar".
     shadow(libs.gson)
+}
+
+// Only the -all.jar is installed or released. The plain jar held the same classes and,
+// left over in build/libs, was easy to pick up stale by mistake.
+tasks.named<Jar>("jar") {
+    enabled = false
 }
 
 tasks.withType<JavaCompile> {
