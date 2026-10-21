@@ -10,7 +10,7 @@ plugins {
 qupathExtension {
     name = "qupath-extension-tme-quant"
     group = "io.github.uw-loci"
-    version = "0.2.3"
+    version = "0.2.4"
     description = "TME Quant: sends QuPath image regions to the TMEQuant FIRE fiber pipeline over a socket and draws the returned fibers as annotations/detections (tiling, seam-stitching, TACS)."
     automaticModule = "io.github.uw.loci.extension.tmequant"
 }

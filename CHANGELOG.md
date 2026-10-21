@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.4 (unreleased)
+## 0.2.4
 
 **Four advanced FIRE settings now use FIRE's own units.** **Direction window**, **FIRE min
 length**, **Interp. spacing** and **Dangling prune** were typed in microns and converted to
@@ -60,6 +60,13 @@ image's calibration. Field names on the wire (`Fiber.width`, `angle`, `lengthArc
 "not a unit bug" and blamed the blur. It was a bug in tme-quant's `fire_2d_angle.smooth()`, which
 convolved the image's size-1 channel axis and scaled the whole image to about 40%. The fix is
 uw-loci/tme-quant#62 (open). The design docs now say so.
+
+**Known issue: keep Smoothing at 0 with an unmodified tme-quant.** The dimming above is how MATLAB
+CT-FIRE itself behaves: its FIRE smooths a 1 x H x W volume, and the zero padding on the size-1 axis
+attenuates it. tme-quant's 2026-10-19 parity work reproduces that on purpose, so #62 is unlikely to
+be merged, and with a current tme-quant any Smoothing above 0 still darkens the image to about 40%
+before FIRE thresholds it. The fix will move into this repository's server, which will blur the
+image itself and send FIRE `sigma_im = 0`.
 
 ## 0.2.3
 
