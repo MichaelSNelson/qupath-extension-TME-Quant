@@ -17,7 +17,12 @@ file from an earlier version ignores them with a notice. On the regression suite
 total length 4,722 µm instead of 4,043: the 31 added fibres average about 22 µm, between the default
 Min fiber length (15 µm) and the old FIRE min length (30 µm). Flow and Centerline do not use these
 settings and are unchanged. If you compare with results from earlier versions, set the four values
-to what they used to send, which depends on your pixel size and downsample.
+to what they used to send, which depends on your pixel size and downsample. Against the 176
+hand-traced fibres of the MH_FNA PDAC 1 birefringence box, FIRE with the new values follows 11 of
+them where the old values followed 1 (17 versus 8 at a loose tolerance), at about one piece per
+fibre: the old 35-vertex direction window let a trace drift from one fibre into the next, and the
+old FIRE min length removed the short pieces that were real. A new tool,
+`tools/qupath-regress/gt_score.py`, does this scoring.
 
 **Distances are remembered per unit.** Every distance setting (Min fiber length, Seed spacing,
 Cross-link search box, Link distance, Max fiber width, TACS zone width, Parallel fibre distance,

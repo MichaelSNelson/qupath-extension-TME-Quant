@@ -49,3 +49,27 @@ because the dialog persists its settings between runs.
   finished (default `~/tmequant-regress/qupath.out`, so start QuPath with its output sent there).
 
 The script works on the open image in place: it clears its objects and never saves it.
+
+## Scoring against hand-traced fibres
+
+`gt_score.py` runs FIRE through the scripting API on an area annotation that holds hand-traced
+LINE annotations and scores each run the way Gurrala et al. 2021 count oversegmentation: how many
+detections follow one traced fibre (most of their length within `--tol` px and `--angle` degrees
+of it), how many traced fibres are hit, pieces per hit fibre, and the share of traced length
+covered. It opens the image from its file and copies the annotations into that scratch image, so
+the project is only read. Edit `SETS` to compare parameter sets.
+
+```bash
+python3 gt_score.py --project /mnt/g/MH_FNA/project.qpproj --entry 258 \
+    --image /mnt/g/MH_FNA/SlideImages/MetroHealth_FNA_PDAC_1_20x_38323_35919_7.0_biref_020.ome.tif \
+    --thresh-im2 77 --out gt_score.json
+```
+
+It writes the scores, the traced lines and every detection to `--out`, so other tolerances can be
+re-scored offline with `gt_score.score()`. It changes the dialog's saved threshold, downsample,
+min length, seed spacing and extra params; reset them before running `regress.py`.
+
+On that box (176 traced fibres, threshold mapped to `thresh_im2` 77, Min length 4 µm, Seed spacing
+8 µm, 2026-10-21), 0.2.4's FIRE settings hit 11 traced fibres where 0.2.3's µm-converted ones hit 1
+(8 px, 30°), and 17 versus 8 at a loose 20 px, 60°, at about one piece per fibre either way.
+
