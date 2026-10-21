@@ -58,8 +58,8 @@ image's calibration. Field names on the wire (`Fiber.width`, `angle`, `lengthArc
 
 **Docs: the smoothing note was wrong.** Design doc 03 said Smoothing above 0 giving 0 fibres was
 "not a unit bug" and blamed the blur. It was a bug in tme-quant's `fire_2d_angle.smooth()`, which
-convolved the image's size-1 channel axis and scaled the whole image to about 40%; it was fixed on
-2026-09-12 in the tme-quant checkout. The design docs now say so.
+convolved the image's size-1 channel axis and scaled the whole image to about 40%. The fix is
+uw-loci/tme-quant#62 (open). The design docs now say so.
 
 ## 0.2.3
 

@@ -137,8 +137,8 @@ conversion**, never to the search, with one exception in the engine's Python wra
    value makes *every* combo return 0 identically. Fixed in 0.2.4: they are sent in FIRE's own
    units (`03` §4).
 4. Smoothing (`sigma_im`) above 0 gave 0 fibres because tme-quant's `fire_2d_angle.smooth()`
-   convolved the size-1 channel axis and scaled the whole image to ~40%. Fixed 2026-09-12 in the
-   tme-quant checkout (`03` §8.0).
+   convolved the size-1 channel axis and scaled the whole image to ~40%. Fixed 2026-09-12;
+   upstream as uw-loci/tme-quant#62, not yet merged (`03` §8.0).
 
 The **self-test** proved the engine + a synthetic image + default params trace fine (63 segments),
 which is what localised the remaining failures to the parameter set. See `03` and `04`.

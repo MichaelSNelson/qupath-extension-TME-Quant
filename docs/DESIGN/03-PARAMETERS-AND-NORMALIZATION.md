@@ -15,9 +15,10 @@
 > (computed for the unattenuated image) then rejected almost everything, and nothing nucleated.
 > `sigma_im = 0` returns early, which is why only 0 worked. The fix skips any axis of size 1. It
 > lives in `tme-quant/src/ctfire_py/fire_2d_angle.py` (and its twin under
-> `src/tme_quant/src/ctfire_py/`), which this repository does not ship. As of 2026-10-20 that fix
-> is still an **uncommitted change** in the tme-quant checkout, so a fresh tme-quant clone has the
-> bug again. FIRE's own default is still `sigma_im = 0`, and the extension defaults to it.
+> `src/tme_quant/src/ctfire_py/`), which this repository does not ship. It is submitted upstream
+> as [uw-loci/tme-quant#62](https://github.com/uw-loci/tme-quant/pull/62) (open, not yet merged as
+> of 2026-10-21); until it is merged, a tme-quant checkout has the fix only if it has that branch
+> or the same local edit. FIRE's own default is still `sigma_im = 0`, and the extension defaults to it.
 
 ---
 
@@ -215,9 +216,9 @@ fixed/base parameter, not at the swept axes.
    `fire_2d_angle.smooth()` convolving the size-1 channel axis of the `(1, J, I)` image with zero
    padding, which scaled the whole image to about 40% (see the note at the top). The 2026-08-13
    entry that stood here called it "not a unit bug" and blamed the blur itself; that explanation
-   was wrong, and its advice to keep `sigma_im = 0` on thin collagen is not needed with the fix. The fix is still an uncommitted change in the
-   tme-quant checkout (`src/ctfire_py/fire_2d_angle.py` and its twin); commit it there before
-   relying on a fresh clone.
+   was wrong, and its advice to keep `sigma_im = 0` on thin collagen is not needed with the fix.
+   The fix is [uw-loci/tme-quant#62](https://github.com/uw-loci/tme-quant/pull/62), open and not
+   yet merged as of 2026-10-21.
 1. **Advanced structural params treated as µm: fixed in 0.2.4** (§4). `s_fiberdir` is a vertex
    count; `thresh_flen`, `s_maxspace` and `thresh_dang_L` are analysis px. All four are sent as
    typed. `s_xlinkbox` and `thresh_linkd` stay in the user unit: both are real distances in the
