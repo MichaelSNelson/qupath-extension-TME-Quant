@@ -11,7 +11,16 @@ when to change it. The dialog is organised in three stages plus a tuner:
 > **Units.** When your image has a pixel size (calibrated), every distance/length/width
 > field is in **microns (µm)** and is converted to analysis pixels at run time — so changing
 > the **Downsample** never changes the physical size you asked for. On an uncalibrated image
-> the same fields are in **full-resolution pixels**. Angles are always in **degrees**.
+> the same fields are in **full-resolution pixels**, and their labels say `px`. Angles are
+> always in **degrees**. The exceptions are four advanced FIRE settings that use FIRE's own
+> units (see *Advanced FIRE settings*).
+>
+> The dialog remembers each distance **once per unit**: the values you last used on a calibrated
+> image and the values you last used on an uncalibrated one are kept apart, and moving between
+> the two kinds of image shows each its own set. A settings file saved on one kind of image and
+> loaded on the other loads everything except the distances, and says so. **Run across
+> project** skips any image whose calibration differs from the image the dialog is open on,
+> and logs why, rather than read microns as pixels.
 
 > **If you just want good settings:** set Thresholding by eye (①), trace a few real fibers as
 > line annotations, and click **Suggest parameters…** — it searches the detection knobs for you.
@@ -72,8 +81,12 @@ image"** always does the full tiled run.
 
 ## Advanced FIRE settings
 
-Pipeline defaults — leave them alone unless you have a reason. All distances/lengths are in
-µm (calibrated) / full-res px (uncalibrated).
+Pipeline defaults — leave them alone unless you have a reason. **Link distance** and **Max
+fiber width** are in µm (calibrated) / full-res px (uncalibrated), like the main distances.
+**Direction window**, **FIRE min length**, **Interp. spacing** and **Dangling prune** are FIRE
+internals and use FIRE's own units and defaults: they are sent to FIRE exactly as typed, so they
+do not follow the pixel size or the downsample. *Analysis px* means pixels of the image FIRE
+receives, at the current **Downsample**.
 
 | Setting | Param | Default | What it does |
 |---|---|---|---|
@@ -82,12 +95,12 @@ Pipeline defaults — leave them alone unless you have a reason. All distances/l
 | **Max fiber width** | `widMAX` | 40 µm | Drops detected fibers **wider** than this — rejects thick blob/vessel detections. Lower if wide artefacts slip through; set high (or max) to keep all. **0 disables it.** (Applied server-side after tracing.) |
 | **Nucleation threshold** | `thresh_Dxlink` | 1.0 | How strong a distance-map peak must be to seed a cross-link. (CT-FIRE GUI ships 1.5.) |
 | **Direction decay** | `lam_dirdecay` | 0.5 | How strongly the tracer keeps its current heading vs. following the local ridge (0–1). Higher tracks persistent curves; lower reacts to sharp bends. |
-| **Direction window** | `s_fiberdir` | 6 µm | Window used to estimate a fiber's local direction. Larger = smoother/steadier direction. |
-| **FIRE min length** | `thresh_flen` | 30 µm | FIRE's *own* short-fiber removal during linking. Distinct from **Min fiber length** (the post-trace filter). |
-| **Interp. spacing** | `s_maxspace` | 10 µm | Vertex spacing when interpolating each fiber centerline. |
+| **Direction window** | `s_fiberdir` | 4 vertices | How many vertices back along a fiber its local direction is taken from. A count, not a distance. Larger = smoother/steadier direction. Minimum 2. |
+| **FIRE min length** | `thresh_flen` | 15 analysis px | FIRE's *own* removal, during linking, of short fibers attached to the network at one end or not at all. Keep it at or below **Min fiber length** (the post-trace filter, in your unit), which is the length cut to tune. |
+| **Interp. spacing** | `s_maxspace` | 5 analysis px | Vertex spacing when interpolating each fiber centerline. Geometry only. |
 | **Angle interval** | `ang_interval` | 5° | Sampling interval used when computing per-fiber angles (orientation/TACS resolution). |
 | **Beam regularisation** | `lambda` | 0.01 | Stiffness of the fiber interpolation (geometry only; doesn't change the count). |
-| **Dangling prune** | `thresh_dang_L` | 30 µm | Short spurs up to this length at a fiber end are trimmed. |
+| **Dangling prune** | `thresh_dang_L` | 15 analysis px | Short spurs up to this length at a fiber end would be trimmed. Currently inactive: this build runs dangler removal in its MATLAB-faithful mode, which removes nothing. |
 | **Extra params (JSON)** | — | — | Override any FIRE `value`-dict parameter directly, e.g. `{"thresh_Dxlink": 1.5, "lam_dirdecay": 0.7}`. These win over the controls above. See *Inert parameters* below. |
 
 ### Inert parameters (no effect in this FIRE-only build)

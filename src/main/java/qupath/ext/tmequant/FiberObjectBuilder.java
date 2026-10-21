@@ -119,7 +119,7 @@ public final class FiberObjectBuilder {
      * Build, optionally clipping every fiber to {@code restrictRoi}.
      *
      * @param restrictRoi   area ROI (full-resolution coords) to clip fibers to, or null for none.
-     * @param minLenInUnit  minimum fiber length in the active unit (µm if calibrated, else px);
+     * @param minLenUserUnit  minimum fiber length in the active unit (µm if calibrated, else px);
      *                      clipped remnants shorter than this are dropped. Ignored when restrictRoi is null.
      */
     public static List<PathObject> build(
@@ -132,7 +132,7 @@ public final class FiberObjectBuilder {
             boolean asDetections,
             PathClass fiberClass,
             ROI restrictRoi,
-            double minLenInUnit) {
+            double minLenUserUnit) {
 
         List<PathObject> out = new ArrayList<>();
         if (fibers == null) {
@@ -142,7 +142,7 @@ public final class FiberObjectBuilder {
         // to full-resolution pixels (x downsample), then to microns if calibrated.
         boolean calibrated = pixelSizeMicrons > 0 && !Double.isNaN(pixelSizeMicrons);
         double toUnit = downsample * (calibrated ? pixelSizeMicrons : 1.0);
-        double pxToUnit = calibrated ? pixelSizeMicrons : 1.0; // full-res px -> unit (downsample already applied)
+        double analysedPxToUserUnit = calibrated ? pixelSizeMicrons : 1.0; // full-res px -> unit (downsample already applied)
         String lenUnit = calibrated ? "um" : "px";
 
         // Pre-convert the restriction ROI to a JTS geometry once.
@@ -216,8 +216,8 @@ public final class FiberObjectBuilder {
                 if (piece.size() < 2) {
                     continue;
                 }
-                double arcUnit = arcLength(piece) * pxToUnit;
-                if (arcUnit + 1e-9 < minLenInUnit) {
+                double arcUserUnit = arcLength(piece) * analysedPxToUserUnit;
+                if (arcUserUnit + 1e-9 < minLenUserUnit) {
                     continue; // remnant shorter than the min fiber length
                 }
                 kept.add(piece);
@@ -225,7 +225,7 @@ public final class FiberObjectBuilder {
             boolean split = kept.size() > 1;
             for (int i = 0; i < kept.size(); i++) {
                 out.add(makeClippedFiber(kept.get(i), plane, asDetections, cls, f,
-                        toUnit, pxToUnit, lenUnit, split ? (i + 1) : -1));
+                        toUnit, analysedPxToUserUnit, lenUnit, split ? (i + 1) : -1));
             }
         }
         return out;
@@ -262,7 +262,7 @@ public final class FiberObjectBuilder {
     /** Build one clipped-fiber object with metrics recomputed from the clipped geometry. */
     private static PathObject makeClippedFiber(
             List<Point2> pts, ImagePlane plane, boolean asDetections, PathClass cls,
-            FiberSocketClient.Fiber f, double toUnit, double pxToUnit, String lenUnit, int part) {
+            FiberSocketClient.Fiber f, double toUnit, double analysedPxToUserUnit, String lenUnit, int part) {
         double arcPx = arcLength(pts);
         Point2 a = pts.get(0);
         Point2 b = pts.get(pts.size() - 1);
@@ -284,8 +284,8 @@ public final class FiberObjectBuilder {
             ml.put("Fiber part", part);
         }
         ml.put("Angle (deg)", angle);
-        ml.put("Length (" + lenUnit + ")", arcPx * pxToUnit);
-        ml.put("End-to-end length (" + lenUnit + ")", endPx * pxToUnit);
+        ml.put("Length (" + lenUnit + ")", arcPx * analysedPxToUserUnit);
+        ml.put("End-to-end length (" + lenUnit + ")", endPx * analysedPxToUserUnit);
         putWidths(ml, f, lenUnit, toUnit); // server widths (analysed px), best-effort after clipping
         ml.put("Straightness", straight);
         if (f.angleToTangent != null) {
@@ -379,8 +379,8 @@ public final class FiberObjectBuilder {
      * and a colour map of the two together showed two fanned populations where there is one.
      */
     private static double orientationDeg(Point2 a, Point2 b) {
-        double ang = Math.toDegrees(Math.atan2(-(b.getY() - a.getY()), b.getX() - a.getX()));
-        return ((ang % 180) + 180) % 180;
+        double angDeg = Math.toDegrees(Math.atan2(-(b.getY() - a.getY()), b.getX() - a.getX()));
+        return ((angDeg % 180) + 180) % 180;
     }
 
     /**

@@ -85,16 +85,16 @@ Put these in the **Extra params (JSON)** box, e.g. `{"thresh_ext": 0.5, "thresh_
 | `lam_dirdecay` | direction decay | 0.5 | How quickly the heading turns toward each new local step: `dir = dir/(1+λ) + best_dir·λ/(1+λ)`. Higher (→0.8) swings the heading to follow the ridge → **traces bend/follow curves**; lower (→0) freezes the running heading → **straighter traces that resist turning**. (The "Medium" wavy-collagen recipe below uses 0.7.) | Medium |
 | `s_minstep` | min step size | 2 | Min pixels advanced per tracing step. | Low |
 | `s_maxstep` | max step size | 6 | Max pixels advanced per step. | Low |
-| `s_fiberdir` | direction window | 4 | Past vertices used for the running-mean direction. | Low |
+| `s_fiberdir` | direction window | 4 | How many vertices back along a fiber its end direction is taken from (a count, not a distance; the C++ clamps it to at least 2). | ✅ In GUI: Advanced ▸ Direction window (vertices) |
 
 ### Fiber linking / cleanup
 | Key | Readable name | Default | What it does | Promote? |
 |---|---|---|---|---|
 | `thresh_linka` | link **angle** thresh | -0.866 (cos 150°) | The angle partner to `thresh_linkd` (already in the GUI). Two ends link only if near-collinear. Looser (-0.5 = 60°) for wavy collagen; stricter (→ -1) for straight. **Tune alongside Link distance.** | ✅ **Now in GUI** (Max link angle, in degrees) |
-| `thresh_flen` | min linked length | 15 | Removes short vertex chains during linking (in vertices; distinct from `LL1`). | Medium |
+| `thresh_flen` | min linked length | 15 | Removes short fibers attached to the network at one end or not at all, during linking. In pixels of the image FIRE receives (`fiberremove` compares it with the summed point-to-point length), not vertices; distinct from `LL1`. | ✅ In GUI: Advanced ▸ FIRE min length (analysis px) |
 | `thresh_numv` | min vertices/fiber | 3 | Drops fibers with fewer vertices. | Low |
 | `s_boundthick` | edge exclusion (px) | 10 | Discards fibers hugging the image edge. (Tiling already trims edges Java-side.) | Medium |
-| `s_maxspace` | interp. gap | 5 | Max gap the spline resampling bridges. | Low |
+| `s_maxspace` | interp. spacing | 5 | Vertex spacing of the spline resampling (`fiber2beam`), in pixels of the image FIRE receives. | ✅ In GUI: Advanced ▸ Interp. spacing (analysis px) |
 | `lambda` | spline tension | 0.01 | Stiffness of fiber interpolation (geometry only, not count). | Low |
 
 ### Angles / scaling

@@ -31,9 +31,10 @@ pixels, **prescales them to 0-255** against a global white point, maps the user'
 **threshold** to FIRE's `thresh_im2`, converts µm distances to analysed pixels, and sends a region
 PNG + parameter JSON. Nearly every "0 fibers" failure has been a **normalization** issue (white
 point too low ⇒ bright collagen clips to a flat plateau ⇒ FIRE seeds nothing) or a **unit** issue
-(advanced FIRE pixel-params inflated by µm→px conversion, held fixed across the whole search). The
-engine itself is proven healthy by the in-app **self-test**. The open work is in
-[03 §8](03-PARAMETERS-AND-NORMALIZATION.md#8-known-open-issues--recommended-fixes-as-of-2026-08).
+(advanced FIRE pixel-params inflated by µm→px conversion, held fixed across the whole search;
+fixed in 0.2.4). The engine itself is proven healthy by the in-app **self-test**. The status of
+each known issue is in
+[03 §8](03-PARAMETERS-AND-NORMALIZATION.md#8-known-issues-and-their-status-updated-2026-10-20).
 
 ## Related existing docs
 

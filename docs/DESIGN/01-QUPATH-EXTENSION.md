@@ -44,7 +44,8 @@ Entry: `show(qupath, tacsDefault)` validates the image/selection, then calls
   smoothing, Link distance, Max fiber width, Nucleation, Direction decay, **Direction window
   (s_fiberdir)**, **FIRE min length (thresh_flen)**, **Interp. spacing (s_maxspace)**, Angle
   interval, Beam regularisation, **Dangling prune (thresh_dang_L)**, and the **Extra params (JSON)**
-  box. (Bolded ones are the µm-conversion trap — see `03 §4`.)
+  box. (The bolded four are in FIRE's own units, vertices and analysis px, and sent as typed
+  since 0.2.4; until then they were converted from µm — see `03 §4`.)
 - **Parameter tuning / Suggest** (`TitledPane`, collapsed) — Count tolerance, Refinement rounds,
   Disjoint pieces; buttons **Calibrate from traced lines**, **Suggest parameters…**, **Tune across
   project…**; a local result echo.
@@ -133,12 +134,14 @@ override set + Extra-JSON overlay + `prescaled:true`).
 ## 3. Fragile / recent areas (read before editing)
 
 - **`serverNormHi` floor vs mask `normHi`** — two parallel intensity scales. The **sent** image is
-  floored (`MAX_SERVER_IM2=155`) so bright collagen keeps its gradient; the **mask** uses the plain
-  99.5th-percentile `normHi`. They must stay consistent per-use; confusing the two reintroduces the
-  saturation bug. (`03 §3`.)
-- **µm↔px advanced params** — converted at *run time* using the current downsample, so changing
-  Downsample silently changes the analysed-px value sent. Several structural params are really
-  CT-FIRE **pixel** quantities mis-typed as µm and inflate on fine-pixel images. (`03 §4`.)
+  floored (`MAX_SERVER_IM2=155`) so bright collagen keeps its gradient; the **mask** uses
+  `displayNormHiNative()` (`normHi` raised to the bright-collagen level, no ratio floor) and maps
+  its threshold through the white point its grayscale was built with. They must stay consistent
+  per-use; confusing the two reintroduces the saturation bug. (`03 §3`.)
+- **User-unit distances** — typed in µm (calibrated) or full-res px (uncalibrated), converted to
+  analysed px at run time, and stored once per unit (`UnitScopedDouble`; reloaded and relabelled
+  by `onUnitChanged` when the active image's calibration differs). The four advanced FIRE
+  internals are not converted at all. (`03 §4`.)
 - **Extra-params JSON** — persisted (`EXTRA_PARAMS` + `rememberText`), parsed at run time (bad JSON
   fails only on Preview/Commit), overlaid **last** so it overrides every control.
 - **`settingsSignature()`** governs preview→commit reuse but omits some advanced-only knobs — a

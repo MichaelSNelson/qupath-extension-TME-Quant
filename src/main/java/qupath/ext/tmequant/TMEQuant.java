@@ -46,8 +46,9 @@ import qupath.lib.roi.interfaces.ROI;
  * println "TME-Quant added ${n} fibres"
  * }</pre>
  *
- * <p>Parameters come from {@link FiberParams#fromPreferences()} (the last values you tuned,
- * including the threshold persisted on each commit); pass a {@code Map} to override a few
+ * <p>Parameters come from {@link FiberParams#fromPreferences(boolean)} (the last values you tuned,
+ * including the threshold persisted on each commit; distances are the ones last tuned on an image
+ * with the same calibration, µm or px, as this one); pass a {@code Map} to override a few
  * ({@code threshold}, {@code downsample}, {@code channel}, {@code minLength}, {@code createDetections},
  * {@code maskToObject}, {@code clearExisting}). Threshold is in NATIVE image units and assumes the
  * project's images are imaged similarly (the same assumption the batch run makes); each image is
@@ -69,10 +70,9 @@ public final class TMEQuant {
     /** As {@link #detectFibers(ImageData)}, with a few parameter overrides (see class docs). */
     public static int detectFibers(ImageData<BufferedImage> imageData, Map<String, Object> overrides) {
         require(imageData);
-        FiberParams p = FiberParams.fromPreferences().withOverrides(overrides);
         ImageServer<BufferedImage> server = imageData.getServer();
         List<ROI> regions = List.of(wholeImageRoi(server));
-        return runOnRegions(imageData, p, regions, defaultLog());
+        return runOnRegions(imageData, overrides, regions, defaultLog());
     }
 
     /** Detect fibres inside EVERY area annotation (any class). Skips if there are none. */
@@ -87,20 +87,18 @@ public final class TMEQuant {
     public static int detectFibersInAnnotations(ImageData<BufferedImage> imageData,
             Set<PathClass> classes) {
         require(imageData);
-        FiberParams p = FiberParams.fromPreferences();
         List<PathObject> targets = areaAnnotations(imageData.getHierarchy(),
                 classes == null || classes.isEmpty() ? null : classes);
         if (targets.isEmpty()) {
             logger.info("TME-Quant: no matching area annotations — nothing to do.");
             return 0;
         }
-        return runOnRegions(imageData, p, roisOf(targets), defaultLog());
+        return runOnRegions(imageData, null, roisOf(targets), defaultLog());
     }
 
     /** Detect fibres inside the currently-selected AREA objects. Returns 0 if none are selected. */
     public static int detectFibersInSelected(ImageData<BufferedImage> imageData) {
         require(imageData);
-        FiberParams p = FiberParams.fromPreferences();
         List<ROI> regions = new ArrayList<>();
         for (PathObject o : imageData.getHierarchy().getSelectionModel().getSelectedObjects()) {
             if (o.getROI() != null && o.getROI().isArea()) {
@@ -111,21 +109,23 @@ public final class TMEQuant {
             logger.info("TME-Quant: no AREA object selected — nothing to do.");
             return 0;
         }
-        return runOnRegions(imageData, p, regions, defaultLog());
+        return runOnRegions(imageData, null, regions, defaultLog());
     }
 
     // --- Core ------------------------------------------------------------------------------------
 
-    private static int runOnRegions(ImageData<BufferedImage> imageData, FiberParams p,
+    private static int runOnRegions(ImageData<BufferedImage> imageData, Map<String, Object> overrides,
             List<ROI> regions, Consumer<String> log) {
         ImageServer<BufferedImage> server = imageData.getServer();
         PathObjectHierarchy hierarchy = imageData.getHierarchy();
         double[] cal = calibrationOf(server);
         boolean calibrated = cal[0] != 0;
-        double pix = cal[1];
+        double pixelSizeMicrons = cal[1];
+        // Distances are stored per unit; take the set that matches THIS image's calibration.
+        FiberParams p = FiberParams.fromPreferences(calibrated).withOverrides(overrides);
         String host = FiberSocketPreferences.getHost();
         int port = FiberSocketPreferences.getPort();
-        if (p.threshold <= 0) {
+        if (p.thresholdNative <= 0) {
             logger.warn("TME-Quant: background threshold is unset (0) — tune it once in the Analyze "
                     + "dialog (it persists on 'Add to image'), or pass a 'threshold' override. "
                     + "Detecting with threshold 0 will treat almost everything as foreground.");
@@ -143,14 +143,14 @@ public final class TMEQuant {
                 ROI restrict = (p.maskToObject && roi.isArea()) ? roi : null;
 
                 double[] norm = FiberEngine.computeRegionNorm(server, p.channel, rx, ry, rw, rh,
-                        p.downsample, p.threshold);
+                        p.downsample, p.thresholdNative);
                 FiberEngine.AnalyzeResult res = FiberEngine.analyzeRegion(host, port, server,
-                        p.channel, rx, ry, rw, rh, p, calibrated, pix, norm[0], norm[1], norm[2],
+                        p.channel, rx, ry, rw, rh, p, calibrated, pixelSizeMicrons, norm[0], norm[1], norm[2],
                         restrict, log);
 
                 List<PathObject> objects = FiberObjectBuilder.build(res.fibers, rx, ry, p.downsample,
-                        pix, roi.getImagePlane(), p.createDetections, fiberClass, restrict,
-                        p.minLengthUnit);
+                        pixelSizeMicrons, roi.getImagePlane(), p.createDetections, fiberClass, restrict,
+                        p.minLengthUserUnit);
                 if (p.clearExisting) {
                     removeExistingFiberObjects(hierarchy, rx, ry, rw, rh);
                 }

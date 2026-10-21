@@ -70,12 +70,12 @@ Three levels, increasing specificity:
    synthetic image of obvious straight fibers** through the normal `ANALYZE_` path with a **minimal
    9-parameter set** (server defaults for the rest) and checks `nTraced`:
    - `backend=real` & `nTraced>0` → the engine **loads and traces the synthetic image**. (A healthy
-     run traces ~19-63 fibers on the test image.) **Caveat (2026-08-13):** a PASS proves the engine
-     loads and can trace *thick* fibers — it does NOT prove your *settings* will trace a real region.
-     The self-test itself runs at `sigma_im=1` and still passes because its synthetic fibres are
-     thick; thin real collagen at **any Smoothing (`sigma_im`) > 0** returns `Fiber segments: 0`
-     (confirmed cause of the 0-fiber runs — see `03 §8.0`). So: self-test PASS + real-image zeros ⇒
-     set smoothing to 0 and re-check before suspecting the build.
+     run traces ~19-63 fibers on the test image.) **Caveat:** a PASS proves the engine loads and
+     can trace *bright, thick* fibers — it does NOT prove your *settings* will trace a real region.
+     The self-test runs at `sigma_im=1` and passed even while tme-quant's `smooth()` bug (fixed
+     2026-09-12, `03 §8.0`) scaled every smoothed image to ~40%: its synthetic fibres stay above
+     threshold at 40%, real collagen does not. So: self-test PASS + real-image zeros at Smoothing
+     > 0 ⇒ check that the server's tme-quant has the `smooth()` fix, or set Smoothing to 0.
    - `backend=real` & `nTraced==0` → **engine PROBLEM**: compiled backend present but not working
      on this machine → **double-click `rebuild_backend.bat`**. The dialog offers to open the docs.
    - `synthetic` → real backend never loaded → troubleshooting/rebuild.

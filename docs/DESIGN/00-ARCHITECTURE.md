@@ -127,14 +127,18 @@ Loops the above over many project images under **one global intensity scale**
 ## 6. Where the bugs have lived (history that informs the design)
 
 Every "0 fibers on a real image" report traced back to **stage ① / normalization / unit
-conversion**, never to the search or the engine:
+conversion**, never to the search, with one exception in the engine's Python wrapper (item 4):
 1. Coarse stats sampling made `normHi` too low → `thresh_im2≈240` (saturation) → fixed by sampling
    near the mask resolution and the `serverNormHi()` floor.
 2. On the **whole image** (mostly dark), the 99.5th-percentile `normHi` collapses → same
    saturation → the `serverNormHi()` floor bounds `thresh_im2 ≤ ~155` regardless.
 3. Advanced FIRE params (`s_fiberdir`, `s_maxspace`, `thresh_flen`, …) converted µm→px inflate on
    fine-pixel images (0.17 µm/px) and are **held fixed across the whole Suggest search**, so a bad
-   value makes *every* combo return 0 identically.
+   value makes *every* combo return 0 identically. Fixed in 0.2.4: they are sent in FIRE's own
+   units (`03` §4).
+4. Smoothing (`sigma_im`) above 0 gave 0 fibres because tme-quant's `fire_2d_angle.smooth()`
+   convolved the size-1 channel axis and scaled the whole image to ~40%. Fixed 2026-09-12 in the
+   tme-quant checkout (`03` §8.0).
 
 The **self-test** proved the engine + a synthetic image + default params trace fine (63 segments),
 which is what localised the remaining failures to the parameter set. See `03` and `04`.

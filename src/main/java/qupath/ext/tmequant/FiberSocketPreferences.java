@@ -47,8 +47,8 @@ public final class FiberSocketPreferences {
             PathPrefs.createPersistentPreference("tmequant.tracer", "");
 
     /** Flow tracer: minimum lateral spacing between parallel fibres, in the active unit. */
-    private static final DoubleProperty FLOW_PARALLEL =
-            PathPrefs.createPersistentPreference("tmequant.flowParallel", 3.0);
+    private static final UnitScopedDouble FLOW_PARALLEL =
+            UnitScopedDouble.migrated("tmequant.flowParallel", "tmequant.flowParallelUm", 3.0);
 
     /** Optional independent anti-flow self-check (adds a per-fibre score). */
     private static final BooleanProperty ANTI_FLOW =
@@ -73,8 +73,8 @@ public final class FiberSocketPreferences {
             PathPrefs.createPersistentPreference("tmequant.exclObjects", "");
     private static final StringProperty EXCL_ROI =
             PathPrefs.createPersistentPreference("tmequant.exclRoi", "");
-    private static final DoubleProperty EXCL_DILATE =
-            PathPrefs.createPersistentPreference("tmequant.exclDilate", 1.0);
+    private static final UnitScopedDouble EXCL_DILATE =
+            UnitScopedDouble.migrated("tmequant.exclDilate", "tmequant.exclDilateUm", 1.0);
     private static final DoubleProperty EXCL_MAX_FRAC =
             PathPrefs.createPersistentPreference("tmequant.exclMaxFrac", 50.0);
     private static final BooleanProperty EXCL_TRIM =
@@ -86,7 +86,7 @@ public final class FiberSocketPreferences {
         return TRACER;
     }
 
-    public static DoubleProperty flowParallelProperty() {
+    public static UnitScopedDouble flowParallelProperty() {
         return FLOW_PARALLEL;
     }
 
@@ -122,7 +122,7 @@ public final class FiberSocketPreferences {
         return EXCL_ROI;
     }
 
-    public static DoubleProperty exclDilateProperty() {
+    public static UnitScopedDouble exclDilateProperty() {
         return EXCL_DILATE;
     }
 
@@ -169,10 +169,15 @@ public final class FiberSocketPreferences {
      *  sensible default. Image-specific, but stored for {@link FiberParams#fromPreferences()}. */
     private static final DoubleProperty THRESHOLD =
             PathPrefs.createPersistentPreference("tmequant.threshold", 0.0);
-    private static final DoubleProperty MIN_LENGTH =
-            PathPrefs.createPersistentPreference("tmequant.minLength", 15.0);
-    private static final DoubleProperty SEED_SPACING =
-            PathPrefs.createPersistentPreference("tmequant.seedSpacingUm", 16.0);
+    // Distances the user types in the dialog's own unit: microns on a calibrated image,
+    // full-resolution pixels on an uncalibrated one. Each is stored once PER UNIT, so a value tuned
+    // on an uncalibrated image never comes back as microns on a calibrated one (or the reverse).
+    // The micron keys keep the names older versions used; where an old name had no unit, the new
+    // micron key starts from the old key's value.
+    private static final UnitScopedDouble MIN_LENGTH =
+            UnitScopedDouble.migrated("tmequant.minLength", "tmequant.minLengthUm", 15.0);
+    private static final UnitScopedDouble SEED_SPACING =
+            new UnitScopedDouble("tmequant.seedSpacingUm", 16.0);
     private static final DoubleProperty SMOOTHING =
             PathPrefs.createPersistentPreference("tmequant.smoothing", 0.0);
     /** Largest tile side (analysed px) the region is split into; caps tile size so huge regions
@@ -188,14 +193,14 @@ public final class FiberSocketPreferences {
     // wander into adjacent structures, minimal recall cost vs 70-89 deg). Raise for curvier samples.
     private static final DoubleProperty BEND_ANGLE =
             PathPrefs.createPersistentPreference("tmequant.bendAngle2", 60.0);
-    private static final DoubleProperty LINK_DISTANCE =
-            PathPrefs.createPersistentPreference("tmequant.linkDistanceUm", 30.0);
+    private static final UnitScopedDouble LINK_DISTANCE =
+            new UnitScopedDouble("tmequant.linkDistanceUm", 30.0);
     private static final DoubleProperty LINK_ANGLE =
             PathPrefs.createPersistentPreference("tmequant.linkAngle", 30.0);
-    private static final DoubleProperty MAX_WIDTH =
-            PathPrefs.createPersistentPreference("tmequant.maxWidthUm", 40.0);
-    private static final DoubleProperty XLINK_BOX =
-            PathPrefs.createPersistentPreference("tmequant.xlinkBoxUm", 6.0);
+    private static final UnitScopedDouble MAX_WIDTH =
+            new UnitScopedDouble("tmequant.maxWidthUm", 40.0);
+    private static final UnitScopedDouble XLINK_BOX =
+            new UnitScopedDouble("tmequant.xlinkBoxUm", 6.0);
     private static final DoubleProperty ANGLE_EXTEND =
             PathPrefs.createPersistentPreference("tmequant.angleExtend", 10.0);
     private static final DoubleProperty DXLINK =
@@ -205,26 +210,31 @@ public final class FiberSocketPreferences {
     // gain, so 0.3 holds the heading steadier on straight collagen. Raise toward 0.6+ for wavy fibres.
     private static final DoubleProperty DIR_DECAY =
             PathPrefs.createPersistentPreference("tmequant.dirDecay2", 0.3);
-    private static final DoubleProperty FIBER_DIR =
-            PathPrefs.createPersistentPreference("tmequant.fiberDirUm", 6.0);
-    private static final DoubleProperty FIRE_FLEN =
-            PathPrefs.createPersistentPreference("tmequant.fireFlenUm", 30.0);
-    private static final DoubleProperty MAX_SPACE =
-            PathPrefs.createPersistentPreference("tmequant.maxSpaceUm", 10.0);
+    // Four FIRE internals kept in FIRE's own units and at FIRE's own defaults (ct_fire.py). Until
+    // 0.2.4 they were typed in microns and converted, which made no sense for the direction window
+    // (a COUNT of vertices) and inflated the rest on fine-pixel images: at 0.1725 um/px the old
+    // 30 um FIRE min length became 174 px, longer than the fibres. New keys, so an old micron value
+    // is never read back in the new unit.
+    private static final DoubleProperty FIBER_DIR_VERTICES =
+            PathPrefs.createPersistentPreference("tmequant.fiberDirVertices", 4.0);
+    private static final DoubleProperty FIRE_FLEN_ANALYSED_PX =
+            PathPrefs.createPersistentPreference("tmequant.fireFlenAnalysedPx", 15.0);
+    private static final DoubleProperty MAX_SPACE_ANALYSED_PX =
+            PathPrefs.createPersistentPreference("tmequant.maxSpaceAnalysedPx", 5.0);
     private static final DoubleProperty ANG_INTERVAL =
             PathPrefs.createPersistentPreference("tmequant.angInterval", 5.0);
     private static final DoubleProperty LAMBDA =
             PathPrefs.createPersistentPreference("tmequant.lambda", 0.01);
-    private static final DoubleProperty DANG_LEN =
-            PathPrefs.createPersistentPreference("tmequant.dangLenUm", 30.0);
+    private static final DoubleProperty DANG_LEN_ANALYSED_PX =
+            PathPrefs.createPersistentPreference("tmequant.dangLenAnalysedPx", 15.0);
     private static final DoubleProperty COUNT_TOL =
             PathPrefs.createPersistentPreference("tmequant.countTol", 15.0);
     private static final IntegerProperty MAX_ROUNDS =
             PathPrefs.createPersistentPreference("tmequant.maxRounds", 3);
     private static final IntegerProperty PIECE_WEIGHT =
             PathPrefs.createPersistentPreference("tmequant.pieceWeight", 0);
-    private static final DoubleProperty TACS_ZONE =
-            PathPrefs.createPersistentPreference("tmequant.tacsZone", 100.0);
+    private static final UnitScopedDouble TACS_ZONE =
+            UnitScopedDouble.migrated("tmequant.tacsZone", "tmequant.tacsZoneUm", 100.0);
     private static final IntegerProperty PREVIEW_SCOPE =
             PathPrefs.createPersistentPreference("tmequant.previewScope", 0);
     private static final StringProperty EXTRA_PARAMS =
@@ -310,11 +320,11 @@ public final class FiberSocketPreferences {
         THRESHOLD.set(v);
     }
 
-    public static DoubleProperty minLengthProperty() {
+    public static UnitScopedDouble minLengthProperty() {
         return MIN_LENGTH;
     }
 
-    public static DoubleProperty seedSpacingProperty() {
+    public static UnitScopedDouble seedSpacingProperty() {
         return SEED_SPACING;
     }
 
@@ -338,7 +348,7 @@ public final class FiberSocketPreferences {
         return BEND_ANGLE;
     }
 
-    public static DoubleProperty linkDistanceProperty() {
+    public static UnitScopedDouble linkDistanceProperty() {
         return LINK_DISTANCE;
     }
 
@@ -346,11 +356,11 @@ public final class FiberSocketPreferences {
         return LINK_ANGLE;
     }
 
-    public static DoubleProperty maxWidthProperty() {
+    public static UnitScopedDouble maxWidthProperty() {
         return MAX_WIDTH;
     }
 
-    public static DoubleProperty xlinkBoxProperty() {
+    public static UnitScopedDouble xlinkBoxProperty() {
         return XLINK_BOX;
     }
 
@@ -366,16 +376,16 @@ public final class FiberSocketPreferences {
         return DIR_DECAY;
     }
 
-    public static DoubleProperty fiberDirProperty() {
-        return FIBER_DIR;
+    public static DoubleProperty fiberDirVerticesProperty() {
+        return FIBER_DIR_VERTICES;
     }
 
-    public static DoubleProperty fireFlenProperty() {
-        return FIRE_FLEN;
+    public static DoubleProperty fireFlenAnalysedPxProperty() {
+        return FIRE_FLEN_ANALYSED_PX;
     }
 
-    public static DoubleProperty maxSpaceProperty() {
-        return MAX_SPACE;
+    public static DoubleProperty maxSpaceAnalysedPxProperty() {
+        return MAX_SPACE_ANALYSED_PX;
     }
 
     public static DoubleProperty angIntervalProperty() {
@@ -386,8 +396,8 @@ public final class FiberSocketPreferences {
         return LAMBDA;
     }
 
-    public static DoubleProperty dangLenProperty() {
-        return DANG_LEN;
+    public static DoubleProperty dangLenAnalysedPxProperty() {
+        return DANG_LEN_ANALYSED_PX;
     }
 
     public static DoubleProperty countTolProperty() {
@@ -402,7 +412,7 @@ public final class FiberSocketPreferences {
         return PIECE_WEIGHT;
     }
 
-    public static DoubleProperty tacsZoneProperty() {
+    public static UnitScopedDouble tacsZoneProperty() {
         return TACS_ZONE;
     }
 
@@ -496,5 +506,41 @@ public final class FiberSocketPreferences {
 
     public static void setCollagenChannel(int channel) {
         COLLAGEN_CHANNEL.set(channel);
+    }
+
+    /**
+     * A distance setting stored once per unit: {@link #um} for calibrated images (microns) and
+     * {@link #fullResPx} for uncalibrated ones (full-resolution pixels). Read and write through
+     * {@link #forUnit(boolean)} with the CURRENT image's calibration.
+     */
+    public static final class UnitScopedDouble {
+        private final DoubleProperty um;
+        private final DoubleProperty fullResPx;
+
+        /** {@code umKey} holds microns; the pixel key is derived from it ("...Um" becomes "...FullResPx"). */
+        UnitScopedDouble(String umKey, double dflt) {
+            this.um = PathPrefs.createPersistentPreference(umKey, dflt);
+            this.fullResPx = PathPrefs.createPersistentPreference(pxKey(umKey), dflt);
+        }
+
+        /** As above, with the micron key seeded from an older key that carried no unit. */
+        static UnitScopedDouble migrated(String oldKey, String umKey, double dflt) {
+            double old = PathPrefs.createPersistentPreference(oldKey, dflt).get();
+            return new UnitScopedDouble(umKey, old, dflt);
+        }
+
+        private UnitScopedDouble(String umKey, double umDefault, double pxDefault) {
+            this.um = PathPrefs.createPersistentPreference(umKey, umDefault);
+            this.fullResPx = PathPrefs.createPersistentPreference(pxKey(umKey), pxDefault);
+        }
+
+        private static String pxKey(String umKey) {
+            return (umKey.endsWith("Um") ? umKey.substring(0, umKey.length() - 2) : umKey) + "FullResPx";
+        }
+
+        /** The stored value for an image with ({@code true}) or without a pixel size. */
+        public DoubleProperty forUnit(boolean calibrated) {
+            return calibrated ? um : fullResPx;
+        }
     }
 }

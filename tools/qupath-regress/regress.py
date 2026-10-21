@@ -439,6 +439,72 @@ return groovy.json.JsonOutput.toJson(p.getImageList().collectEntries { e ->
     return {"counts": counts, "summary": text}, fails
 
 
+def s_batch_skips_other_unit(q):
+    """Batch over a calibrated and an uncalibrated image: the one in the other unit is skipped."""
+    # The dialog's distances are in ITS image's unit; read as the other unit they would be wrong
+    # (16 um of seed spacing taken as 16 px), so Run across project must skip that image and say so.
+    proj = os.path.join(CONFIG["workdir"], "proj_units")
+    q.groovy(f'''import qupath.lib.projects.Projects
+import qupath.lib.images.servers.ImageServers
+import qupath.lib.images.servers.ImageServerMetadata
+import qupath.lib.objects.PathObjects
+import qupath.lib.roi.ROIs
+import qupath.lib.regions.ImagePlane
+def dir = new File("{proj}")
+if (dir.exists()) dir.deleteDir()
+dir.mkdirs()
+def project = Projects.createProject(dir, java.awt.image.BufferedImage)
+def uri = new File("{CONFIG['image']}").toURI()
+[["calibrated", true], ["uncalibrated", false]].each {{ n, keep ->
+    def e = project.addImage(ImageServers.buildServer(uri).getBuilder())
+    e.setImageName("liver_" + n)
+    def d = e.readImageData()
+    if (!keep) {{
+        d.updateServerMetadata(new ImageServerMetadata.Builder(d.getServer().getMetadata())
+            .pixelSizeMicrons(Double.NaN, Double.NaN).build())
+    }}
+    d.getHierarchy().addObject(PathObjects.createAnnotationObject(
+        ROIs.createRectangleROI(4000, 2500, 1600, 1600, ImagePlane.getDefaultPlane())))
+    e.saveImageData(d)
+}}
+project.syncChanges()
+qupath.getImageData()?.setChanged(false)
+fx {{ qupath.setProject(project); qupath.openImageEntry(project.getImageList()[0]) }}
+return project.getImageList().size()''')
+    time.sleep(3)
+    select_first_annotation(q)
+    open_dialog(q)
+    set_controls(q, BASE + FLOW)
+    close_dialogs(q)
+    open_dialog(q)
+    q.call("qupath_click", text="Run across project…", window=DIALOG)
+    q.call("qupath_wait", text="Run analysis", window=BATCH, timeout_s=30)
+    q.call("qupath_click", text="All project images (2)", window=BATCH)
+    q.call("qupath_click", text="Inside every area annotation", window=BATCH)
+    mark = log_mark()
+    q.call("qupath_click", text="Run analysis", window=BATCH)
+    q.call("qupath_wait", text="Batch targets", timeout_s=60)
+    q.call("qupath_key", keys="Enter", window="Batch targets")
+    q.call("qupath_wait", text="Finished.", window=BATCH, timeout_s=1800)
+    shown = q.call("qupath_describe", window=BATCH, limit=80)
+    counts, _ = q.groovy('''def p = qupath.getProject()
+return groovy.json.JsonOutput.toJson(p.getImageList().collectEntries { e ->
+    def d = e.readImageData()
+    [e.getImageName(), d.getHierarchy().getDetectionObjects().count { it.getPathClass()?.toString() == "Fiber" }] })''')
+    counts = json.loads(counts)
+    fails = []
+    if counts.get("liver_calibrated", 0) == 0:
+        fails.append(f"the calibrated image got no fibres: {counts}")
+    if counts.get("liver_uncalibrated", 0) != 0:
+        fails.append(f"the uncalibrated image was traced with micron settings: {counts}")
+    if "no pixel size, and the settings are in µm" not in shown:
+        fails.append("the batch dialog does not say why the uncalibrated image was skipped")
+    close_dialogs(q)
+    q.groovy('fx { qupath.setProject(null) }\nreturn "ok"')
+    open_image(q)
+    return None, fails
+
+
 def snap_failure(q, name, run_dir):
     """Save every open QuPath window (dialogs and the viewer) as they are when a scenario fails.
 
@@ -521,6 +587,7 @@ SCENARIOS = {
     "restrict_to_object": s_restrict_to_object,
     "tacs": s_tacs,
     "batch_two_images": s_batch_two_images,
+    "batch_skips_other_unit": s_batch_skips_other_unit,
     "large_postprocess": s_large_postprocess,
 }
 

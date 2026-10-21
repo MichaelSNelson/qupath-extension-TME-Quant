@@ -397,23 +397,23 @@ public final class ExclusionMask {
      * <p>White (255) = excluded. Full-image coordinates map to tile-local pixels as
      * {@code local = (full - origin) / downsample}, matching {@link MaskRasterizer}.</p>
      *
-     * @param dilatePx how far to grow each region, in ANALYSED (downsampled) pixels. Segmentation
+     * @param dilateAnalysedPx how far to grow each region, in ANALYSED (downsampled) pixels. Segmentation
      *     outlines often sit just inside the bright object they mark, so a small dilation catches
      *     the halo. 0 for none.
      * @return the mask, or null when no region touches this tile (so the caller can skip sending it)
      */
     public BufferedImage rasterise(
-            int regionX, int regionY, double downsample, int outW, int outH, double dilatePx) {
+            int regionX, int regionY, double downsample, int outW, int outH, double dilateAnalysedPx) {
         double x0 = regionX;
         double y0 = regionY;
         double x1 = regionX + outW * downsample;
         double y1 = regionY + outH * downsample;
-        double padFull = Math.max(0, dilatePx) * downsample;
+        double padFullResPx = Math.max(0, dilateAnalysedPx) * downsample;
 
         List<Integer> hits = new ArrayList<>();
         for (int i = 0; i < polys.size(); i++) {
-            if (bounds[i * 4 + 2] + padFull < x0 || bounds[i * 4] - padFull > x1
-                    || bounds[i * 4 + 3] + padFull < y0 || bounds[i * 4 + 1] - padFull > y1) {
+            if (bounds[i * 4 + 2] + padFullResPx < x0 || bounds[i * 4] - padFullResPx > x1
+                    || bounds[i * 4 + 3] + padFullResPx < y0 || bounds[i * 4 + 1] - padFullResPx > y1) {
                 continue;
             }
             hits.add(i);
@@ -435,8 +435,8 @@ public final class ExclusionMask {
             double s = 1.0 / downsample;
             // Dilation is done by ALSO stroking the outline with a pen of that width, which grows
             // the filled shape by half the pen on each side — cheap and good enough at these sizes.
-            java.awt.Stroke stroke = dilatePx > 0
-                    ? new BasicStroke((float) (dilatePx * 2), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
+            java.awt.Stroke stroke = dilateAnalysedPx > 0
+                    ? new BasicStroke((float) (dilateAnalysedPx * 2), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)
                     : null;
             for (int idx : hits) {
                 float[] p = polys.get(idx);

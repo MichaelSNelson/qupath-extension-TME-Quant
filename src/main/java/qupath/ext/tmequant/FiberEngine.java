@@ -196,7 +196,7 @@ public final class FiberEngine {
 
     private static FiberSocketClient.AnalyzeResponse detectTile(FiberSocketClient client,
             ImageServer<BufferedImage> server, Tile tile, int tileIdx, int channel, double d,
-            String detMeta, String[] backendOut, double normLo, double serverNormHi, ROI restrictRoi)
+            String detMeta, String[] backendOut, double normLoNative, double serverNormHiNative, ROI restrictRoi)
             throws Exception {
         RegionRequest req = RegionRequest.createInstance(
                 server.getPath(), d, tile.fullX, tile.fullY, tile.fullW, tile.fullH);
@@ -204,7 +204,7 @@ public final class FiberEngine {
         if (region == null) {
             throw new RuntimeException("server.readRegion returned null for a tile");
         }
-        BufferedImage gray = ChannelExtractor.toGray(region, channel, normLo, serverNormHi);
+        BufferedImage gray = ChannelExtractor.toGray(region, channel, normLoNative, serverNormHiNative);
         if (restrictRoi != null) {
             BufferedImage roiMask = MaskRasterizer.rasterise(
                     restrictRoi, tile.fullX, tile.fullY, d, gray.getWidth(), gray.getHeight());
@@ -245,7 +245,7 @@ public final class FiberEngine {
     /** ~2.56 MP: below this a region is sampled at the selected downsample (matches the dialog). */
     private static final long PREVIEW_FAITHFUL_MAX_PX = 2_560_000L;
 
-    /** {normLo, normHi} for a region; see {@link #computeRegionNorm(ImageServer, int, int, int, int, int, double, double)}. */
+    /** {normLoNative, normHiNative} for a region; see {@link #computeRegionNorm(ImageServer, int, int, int, int, int, double, double)}. */
     public static double[] computeRegionNorm(ImageServer<BufferedImage> server, int channel,
             int rx, int ry, int rw, int rh, double d) throws Exception {
         double[] n = computeRegionNorm(server, channel, rx, ry, rw, rh, d, Double.NaN);
@@ -253,16 +253,16 @@ public final class FiberEngine {
     }
 
     /**
-     * {normLo, normHi, collagenLevel} for a region, sampled exactly as
+     * {normLoNative, normHiNative, collagenLevelNative} for a region, sampled exactly as
      * {@code FiberAnalysisDialog.computeStats} samples it: the whole region at the analysis
      * downsample when it fits a faithful preview, else a central ~1600 analysed-px patch at that
      * downsample (coarsening the whole region instead averages thin bright collagen into the dark
-     * around it and pulls the white point down). normLo is the minimum, normHi the 99.5th
-     * percentile, and collagenLevel the 99.9th percentile of the pixels above {@code threshold}
+     * around it and pulls the white point down). normLoNative is the minimum, normHiNative the 99.5th
+     * percentile, and collagenLevelNative the 99.9th percentile of the pixels above {@code threshold}
      * (0 when it is NaN or too few pixels are above it), which the white point must cover.
      */
     public static double[] computeRegionNorm(ImageServer<BufferedImage> server, int channel,
-            int rx, int ry, int rw, int rh, double d, double threshold) throws Exception {
+            int rx, int ry, int rw, int rh, double d, double thresholdNative) throws Exception {
         long analysedPx = (long) Math.ceil(rw / d) * (long) Math.ceil(rh / d);
         int statDown = Math.max(1, (int) Math.ceil(d));
         int srx = rx, sry = ry, srw = rw, srh = rh;
@@ -285,21 +285,21 @@ public final class FiberEngine {
         }
         double[] sorted = f.clone();
         java.util.Arrays.sort(sorted);
-        double normLo = sorted[0];
-        double statMax = sorted[sorted.length - 1];
-        double normHi = percentile(sorted, 0.995);
-        if (normHi <= normLo) {
-            normHi = statMax > normLo ? statMax : normLo + 1.0;
+        double normLoNative = sorted[0];
+        double statMaxNative = sorted[sorted.length - 1];
+        double normHiNative = percentile(sorted, 0.995);
+        if (normHiNative <= normLoNative) {
+            normHiNative = statMaxNative > normLoNative ? statMaxNative : normLoNative + 1.0;
         }
-        return new double[] {normLo, normHi, brightCollagenLevel(sorted, threshold)};
+        return new double[] {normLoNative, normHiNative, brightCollagenLevelNative(sorted, thresholdNative)};
     }
 
     /** 99.9th percentile of the samples above {@code threshold}; 0 when there are too few (dialog rule). */
-    static double brightCollagenLevel(double[] sorted, double threshold) {
-        if (Double.isNaN(threshold) || sorted.length < 64) {
+    static double brightCollagenLevelNative(double[] sorted, double thresholdNative) {
+        if (Double.isNaN(thresholdNative) || sorted.length < 64) {
             return 0.0;
         }
-        double[] above = java.util.Arrays.stream(sorted).filter(v -> v > threshold).toArray();
+        double[] above = java.util.Arrays.stream(sorted).filter(v -> v > thresholdNative).toArray();
         return above.length < 32 ? 0.0 : percentile(above, 0.999);
     }
 
@@ -312,24 +312,24 @@ public final class FiberEngine {
      */
     public static AnalyzeResult analyzeRegion(String host, int port,
             ImageServer<BufferedImage> server, int channel, int rx, int ry, int rw, int rh,
-            FiberParams p, boolean calibrated, double pixelSizeMicrons, double normLo, double normHi,
+            FiberParams p, boolean calibrated, double pixelSizeMicrons, double normLoNative, double normHiNative,
             ROI restrictRoi, Consumer<String> log) throws Exception {
         return analyzeRegion(host, port, server, channel, rx, ry, rw, rh, p, calibrated,
-                pixelSizeMicrons, normLo, normHi, 0.0, restrictRoi, log);
+                pixelSizeMicrons, normLoNative, normHiNative, 0.0, restrictRoi, log);
     }
 
     /** As above, with the region's bright-collagen level from {@link #computeRegionNorm} (index 2). */
     public static AnalyzeResult analyzeRegion(String host, int port,
             ImageServer<BufferedImage> server, int channel, int rx, int ry, int rw, int rh,
-            FiberParams p, boolean calibrated, double pixelSizeMicrons, double normLo, double normHi,
-            double collagenLevel, ROI restrictRoi, Consumer<String> log) throws Exception {
+            FiberParams p, boolean calibrated, double pixelSizeMicrons, double normLoNative, double normHiNative,
+            double collagenLevelNative, ROI restrictRoi, Consumer<String> log) throws Exception {
         double d = p.downsample;
         int rwA = (int) Math.ceil(rw / d);
         int rhA = (int) Math.ceil(rh / d);
         List<Tile> tiles = computeTiles(rx, ry, rwA, rhA, server.getWidth(), server.getHeight(), d);
         String detMeta = p.buildDetectMeta(rx, ry, rw, rh, d, calibrated, pixelSizeMicrons,
-                normLo, normHi, collagenLevel, null, null);
-        double serverNormHi = p.whitePoint(normLo, normHi, collagenLevel);
+                normLoNative, normHiNative, collagenLevelNative, null, null);
+        double serverNormHiNative = p.whitePoint(normLoNative, normHiNative, collagenLevelNative);
         logProgress(log, String.format(
                 "TME-Quant: region %dx%d @(%d,%d) downsample=%s -> %d analysed px -> %d tile(s)",
                 rw, rh, rx, ry, trim(d), rwA * rhA, tiles.size()));
@@ -353,7 +353,7 @@ public final class FiberEngine {
             FiberSocketClient.AnalyzeResponse resp;
             try {
                 resp = detectTile(client, server, tl, t, channel, d, detMeta, backend,
-                        normLo, serverNormHi, restrictRoi);
+                        normLoNative, serverNormHiNative, restrictRoi);
             } catch (Exception ex) {
                 resp = null;
                 logger.warn("  tile {}/{} read/IO error: {}", t + 1, tiles.size(), ex.getMessage());

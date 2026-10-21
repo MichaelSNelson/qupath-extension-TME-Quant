@@ -44,19 +44,19 @@ public final class ChannelExtractor {
      * near-black border tile maps to ~0 instead of having its noise amplified
      * into spurious fibers. Handles 8/16/32-bit and negative (unmixed) values.
      */
-    public static BufferedImage toGray(BufferedImage region, int channel, double lo, double hi) {
+    public static BufferedImage toGray(BufferedImage region, int channel, double loNative, double hiNative) {
         var raster = region.getRaster();
         int w = region.getWidth();
         int h = region.getHeight();
         int nb = raster.getNumBands();
         int band = Math.min(Math.max(channel, 0), nb - 1);
         double[] s = raster.getSamples(0, 0, w, h, band, (double[]) null);
-        double range = hi > lo ? hi - lo : 1.0;
-        double scale = 255.0 / range;
+        double range = hiNative > loNative ? hiNative - loNative : 1.0;
+        double gray8PerNative = 255.0 / range;
         int[] out = new int[w * h];
         for (int i = 0; i < s.length; i++) {
-            double v = Double.isFinite(s[i]) ? s[i] : lo;
-            int g = (int) Math.round((v - lo) * scale);
+            double v = Double.isFinite(s[i]) ? s[i] : loNative;
+            int g = (int) Math.round((v - loNative) * gray8PerNative);
             out[i] = g < 0 ? 0 : (g > 255 ? 255 : g);
         }
         BufferedImage gray = new BufferedImage(w, h, BufferedImage.TYPE_BYTE_GRAY);

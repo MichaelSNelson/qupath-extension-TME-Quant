@@ -74,7 +74,10 @@ public final class ExclusionSection extends VBox {
     private final Button browseBtn;
     private final Button loadBtn;
     private final ComboBox<String> roiBox;
-    private final Spinner<Double> dilateSpinner;
+    private final Spinner<Double> dilateSpinner;   // user unit: µm, or full-res px when uncalibrated
+    private final Label dilateLabel = new Label("Grow regions (µm)");
+    /** Whether the current image has a pixel size; picks the unit {@link #dilateSpinner} is in. */
+    private boolean calibrated = true;
     private final Spinner<Double> maxFracSpinner;
     private final CheckBox trimCheck;
     private final CheckBox eraseCheck;
@@ -155,7 +158,8 @@ public final class ExclusionSection extends VBox {
         dilateSpinner.setEditable(true);
         dilateSpinner.setPrefWidth(90);
         dilateSpinner.setTooltip(ttip(
-                "Grow each region by this much, in µm, before masking. Segmentation outlines often "
+                "Grow each region by this much, in µm (full-resolution pixels on an uncalibrated "
+                + "image), before masking. Segmentation outlines often "
                 + "sit just INSIDE the bright object, leaving a rim that still gets traced. HIGHER "
                 + "catches more of that rim but masks more real collagen; 0 uses the outline as-is."));
 
@@ -206,7 +210,7 @@ public final class ExclusionSection extends VBox {
         g.add(fileRow, 1, r++);
         g.add(new Label("Region to exclude"), 0, r);
         g.add(roiBox, 1, r++);
-        g.add(new Label("Grow regions (µm)"), 0, r);
+        g.add(dilateLabel, 0, r);
         g.add(dilateSpinner, 1, r++);
         g.add(new Label("Drop fibre if ≥ (% inside)"), 0, r);
         g.add(maxFracSpinner, 1, r++);
@@ -277,7 +281,13 @@ public final class ExclusionSection extends VBox {
         roiBox.valueProperty().addListener(
                 (o, a, b) -> FiberSocketPreferences.exclRoiProperty().set(b == null ? "" : b));
 
-        setSpinner(dilateSpinner, FiberSocketPreferences.exclDilateProperty());
+        // Stored per unit, re-read when the image's calibration changes (see setImageData).
+        loadDilate();
+        dilateSpinner.valueProperty().addListener((o, a, b) -> {
+            if (b != null) {
+                FiberSocketPreferences.exclDilateProperty().forUnit(calibrated).set(b);
+            }
+        });
         setSpinner(maxFracSpinner, FiberSocketPreferences.exclMaxFracProperty());
 
         trimCheck.setSelected(FiberSocketPreferences.exclTrimProperty().get());
@@ -314,6 +324,11 @@ public final class ExclusionSection extends VBox {
     /** Called when the dialog's active image changes, to refresh the classification list. */
     public void setImageData(ImageData<BufferedImage> data) {
         this.imageData = data;
+        boolean nowCalibrated = data == null || isCalibrated(data);
+        if (nowCalibrated != calibrated) {
+            calibrated = nowCalibrated;
+            loadDilate();
+        }
         String prev = classBox.getValue();
         Set<String> classes = new LinkedHashSet<>();
         classes.add(ANY_CLASS);
@@ -352,16 +367,39 @@ public final class ExclusionSection extends VBox {
         return eraseCheck.isSelected();
     }
 
-    /** Dilation converted from µm to ANALYSED pixels at the given downsample. */
-    public double dilatePx(double downsample, double pixelSizeMicrons) {
-        double um = dilateSpinner.getValue();
-        if (um <= 0) {
+    /**
+     * Dilation in ANALYSED pixels at the given downsample. The spinner is in µm on a calibrated
+     * image and in full-resolution pixels on an uncalibrated one, as every other distance in the
+     * dialog is. (Before 0.2.4 an uncalibrated value was taken as analysed pixels, so it grew with
+     * the downsample.)
+     */
+    public double dilateAnalysedPx(double downsample, double pixelSizeMicrons) {
+        double dilateUserUnit = dilateSpinner.getValue();
+        if (dilateUserUnit <= 0) {
             return 0;
         }
-        if (pixelSizeMicrons <= 0 || Double.isNaN(pixelSizeMicrons)) {
-            return um; // no calibration — treat the value as analysed pixels
+        boolean hasPixelSize = pixelSizeMicrons > 0 && !Double.isNaN(pixelSizeMicrons);
+        double dilateFullResPx = hasPixelSize ? dilateUserUnit / pixelSizeMicrons : dilateUserUnit;
+        return dilateFullResPx / Math.max(1e-9, downsample);
+    }
+
+    /** Show and edit the value stored for the current unit, and name that unit in the label. */
+    private void loadDilate() {
+        try {
+            dilateSpinner.getValueFactory().setValue(
+                    FiberSocketPreferences.exclDilateProperty().forUnit(calibrated).get());
+        } catch (RuntimeException ex) {
+            // stored value outside this spinner's range -- keep the current one
         }
-        return um / pixelSizeMicrons / Math.max(1e-9, downsample);
+        dilateLabel.setText(calibrated ? "Grow regions (µm)" : "Grow regions (px)");
+    }
+
+    /** The same test the dialog uses: a pixel size that is finite and above zero. */
+    private static boolean isCalibrated(ImageData<BufferedImage> data) {
+        var cal = data.getServer().getPixelCalibration();
+        double pixelSizeMicrons = (cal != null && cal.hasPixelSizeMicrons())
+                ? cal.getAveragedPixelSizeMicrons() : Double.NaN;
+        return Double.isFinite(pixelSizeMicrons) && pixelSizeMicrons > 0;
     }
 
     private ExclusionMask.RoiChoice roiChoice() {
@@ -576,7 +614,7 @@ public final class ExclusionSection extends VBox {
             return null;
         }
         BufferedImage img = mask.rasterise(regionX, regionY, downsample, outW, outH,
-                dilatePx(downsample, pixelSizeMicrons));
+                dilateAnalysedPx(downsample, pixelSizeMicrons));
         return img != null ? img : new BufferedImage(outW, outH, BufferedImage.TYPE_BYTE_GRAY);
     }
 }

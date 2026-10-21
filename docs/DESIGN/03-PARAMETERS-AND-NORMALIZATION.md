@@ -5,18 +5,19 @@
 > the user sets in the dialog becomes the number CT-FIRE sees. All Java references are in
 > `FiberAnalysisDialog.java` unless noted.
 >
-> **⚠ 2026-08-13 — thin collagen needs `sigma_im=0`; *any* smoothing >0 zeroes detection.** The
-> *same* local backend traced fibres at **`sigma_im=0`** and returned **`Fiber segments: 0`** at
-> **any `sigma_im>0`** on the same image. It is **not** a unit bug — `sigma_im` is honest pixels end
-> to end (client sends it raw, server forwards it, `fire_2d_angle.smooth()` uses a `ceil(2σ)`-px
-> Gaussian). The image reaching FIRE is `round_mlab(smooth(im, σ))` **then** thresholded, so on
-> ~1-2 px collagen ridges a σ=1 kernel drops the peak below `thresh_im2`, the round pins it under,
-> and nothing nucleates. FIRE's own default is `sigma_im=0` (`get_fire.py:23`); the engine is meant
-> to run unsmoothed on thin fibres. The extension already defaults to 0 — a `sigma_im=1` comes from a
-> manual change that then persists (`tmequant.smoothing`). Because the Suggest search holds smoothing
-> FIXED (§7), a nonzero fixed value zeroes *every* combo at once (the original "all combos 0
-> detected"). The earlier same-day "local traces / remote zeros" gap was **not** a compiled-binary
-> difference — it was `sigma_im=0` locally vs a nonzero value remotely (§8.0, §9).
+> **Smoothing above 0 used to give 0 fibres. That was a bug, fixed on 2026-09-12.** On
+> 2026-08-13 this doc called it "not a unit bug" and blamed a σ=1 blur for flattening thin
+> ridges below `thresh_im2`. That explanation was wrong. The cause was in tme-quant's
+> `fire_2d_angle.smooth()`: the 2-D image arrives shaped `(1, J, I)`, and `smooth()` convolved
+> every axis, including the size-1 channel axis, with zero padding. Along that axis the
+> convolution only multiplies the image by the kernel's centre weight, about 0.4 for any
+> sigma > 0. The whole image dropped to ~40% of its brightness, the client's `thresh_im2`
+> (computed for the unattenuated image) then rejected almost everything, and nothing nucleated.
+> `sigma_im = 0` returns early, which is why only 0 worked. The fix skips any axis of size 1. It
+> lives in `tme-quant/src/ctfire_py/fire_2d_angle.py` (and its twin under
+> `src/tme_quant/src/ctfire_py/`), which this repository does not ship. As of 2026-10-20 that fix
+> is still an **uncommitted change** in the tme-quant checkout, so a fresh tme-quant clone has the
+> bug again. FIRE's own default is still `sigma_im = 0`, and the extension defaults to it.
 
 ---
 
@@ -45,8 +46,14 @@ native pixel  ──prescale [normLo, HI]→[0,255]──▶  8-bit gray  ──
     down).
   - `normLo = statMin` (sample min); `normHi = 99.5th percentile` of the sample (robust white
     point that ignores a few hot pixels).
-- **`threshIm2()`** — maps the native threshold onto 0-255 for the **live mask**:
-  `clamp((threshold − normLo) / (normHi − normLo) × 255, 0, 255)`.
+- **`displayNormHiNative()`** (0.2.4) — the white point of the **live mask**'s grayscale:
+  `max(normHi, brightCollagenLevelNative())`, the second being the 99.9th percentile of the
+  above-threshold sample (the same level the sent image is scaled to cover, §3).
+- **`threshIm2For(threshold, whitePoint)`** — maps the native threshold onto 0-255 through the
+  white point the mask's grayscale was built with:
+  `clamp((threshold − normLo) / (whitePoint − normLo) × 255, 0, 255)`. Each grayscale stores its
+  white point (`lastBgWhitePointNative`, `pickedTileWhitePointNative`), so gray and threshold
+  always share a scale.
 - **`serverNormHi()` / `serverThreshIm2()`** — the *floored* versions used for the image **sent to
   FIRE** (see §3).
 
@@ -81,10 +88,15 @@ private int serverThreshIm2(double lo, double hi) { … maps threshold through s
 
 - Applied to the **sent** paths: `buildMeta` (`thresh_im2`), `detectTile` (prescale white point),
   `buildPieceFrom` (Suggest/batch pieces), `buildGridMeta`, `exportTile`.
-- **Not** applied to the live mask (`refreshBackground`'s prescale, `buildThresholdOverlay`,
-  `threshIm2()`). Rationale: the mask's *red region* is `{native > threshold}`, which is invariant
-  to the white point (absent clipping), so the user's threshold-setting stays correct; the mask
-  grayscale may show more clipping than the sent image, which is only cosmetic.
+- The **ratio floor** is not applied to the live mask, so the mask keeps its contrast. The mask's
+  violet region is `{native > threshold}`, which does not depend on the white point as long as
+  the threshold sits below it.
+- The **bright-collagen level** is applied to the live mask since 0.2.4 (`displayNormHiNative`,
+  §2). Before that the mask used plain `normHi`, and on a large or sparse region that was not
+  only cosmetic. With `normHi` at the collagen's own intensity, every bundle drew as flat white,
+  and a threshold above `normHi` mapped to 255 and drew an **empty mask**, although pixels above
+  the threshold existed. When the threshold is raised to within 5% of the white point a mask was
+  built with, the background is re-read (`refreshBackgroundIfThresholdNearWhitePoint`).
 
 **Invariant to preserve:** `serverThreshIm2()` and the `serverNormHi()` used to prescale the sent
 image **must use the same `(lo, hi)`**. They do, because both derive from the same fields (or the
@@ -101,29 +113,48 @@ global scale first).
 - This keeps physical params **downsample-independent**: change Downsample and the real-world size
   a param represents stays constant.
 
-### ★ The advanced-param unit trap
-Some "advanced FIRE" controls are **CT-FIRE algorithmic pixel values**, not physical microns —
-e.g. `s_fiberdir` (the window used to estimate a fiber's local direction while extending it). The
-extension currently treats them as µm and runs them through `toAnalysedPx`. On a **fine-pixel
-image** (the liver test is 0.1725 µm/px) this inflates them badly:
+### The advanced-param unit trap (fixed in 0.2.4)
+Four "advanced FIRE" controls are CT-FIRE algorithmic values, not physical microns. Until 0.2.4
+the extension treated them as µm and ran them through `toAnalysedPx`. On a fine-pixel image (the
+liver test is 0.1725 µm/px) that inflated them badly:
 
-| Control (default) | Treated as | At 0.1725 µm/px, downsample 1 |
+| Control (old default) | At 0.1725 µm/px, downsample 1 | What FIRE actually reads |
 |---|---|---|
-| Direction window `s_fiberdir` = 6 | µm | **~35 px** (should be ~5-6 px) |
-| Interp. spacing `s_maxspace` = 10 | µm | ~58 px |
-| FIRE min length `thresh_flen` = 30 | µm | ~174 px (longer than the fibers!) |
-| Dangling prune `thresh_dang_L` = 30 | µm | ~174 px |
+| Direction window `s_fiberdir` = 6 µm | 35 | a COUNT of vertices back along the fiber (`_end_direction` uses `fv[sp]`); FIRE default 4 |
+| Interp. spacing `s_maxspace` = 10 µm | 58 px | resampling spacing in analysis px; FIRE default 5 |
+| FIRE min length `thresh_flen` = 30 µm | 174 px, longer than the fibres | compared with the summed point-to-point length in analysis px; FIRE default 15 |
+| Dangling prune `thresh_dang_L` = 30 µm | 174 px | analysis px; inactive in this build; FIRE default 15 |
 
-A 35-px direction window spans an entire ~34-px wavy fiber, so the direction estimate is garbage
-and extension dies → **0 segments**. Because these are **held fixed across the entire Suggest
-search**, every combo fails *identically* — which is exactly the observed symptom. This is the
-leading open suspect for the region-at-healthy-`thresh_im2` zero. **Status: not yet fixed** — see
-§8. The workaround is the Extra-params JSON box (§6).
+At the usual downsample 4 the old FIRE min length was still 43 px, above the 22 px of the 15 µm
+**Min fiber length**, so FIRE's internal cut, not the control users tune, set the shortest fibre
+kept.
+
+**Since 0.2.4** these four are typed in FIRE's own units (vertices, analysis px) at FIRE's own
+defaults (`ct_fire.py`) and sent as typed. Their preference keys are new
+(`tmequant.fiberDirVertices`, `tmequant.fireFlenAnalysedPx`, `tmequant.maxSpaceAnalysedPx`,
+`tmequant.dangLenAnalysedPx`), so an old micron value is never read in the new unit. A version-1
+settings file's `fiberDir`, `fireFlen`, `maxSpace` and `dangLen` are ignored, with a notice.
+
+### Unit-scoped persistence (0.2.4)
+Every user-unit distance (Min fiber length, Seed spacing, Cross-link box, Link distance, Max
+width, TACS zone, Parallel fibre distance, exclusion Grow regions) is stored once per unit
+(`FiberSocketPreferences.UnitScopedDouble`): `tmequant.<name>Um` for calibrated images and
+`tmequant.<name>FullResPx` for uncalibrated ones. The dialog reads and writes the store for the
+current image's calibration and reloads all of them, and relabels them, when it follows the
+active image to one with the other calibration (`onUnitChanged`). `FiberParams.fromPreferences
+(calibrated)` does the same for the scripting API. Before, a value tuned on an uncalibrated image
+came back as microns on a calibrated one.
+
+Two related guards: loading a settings file saved in the other unit skips the distance keys
+(`USER_UNIT_SETTING_KEYS`) instead of applying them, and **Run across project** skips an image
+whose calibration differs from the dialog's image. Exclusion **Grow regions** on an uncalibrated
+image is now full-resolution px, like every other distance (it was analysis px before).
 
 ## 5. The full parameter set sent to FIRE
 
 `buildMeta(downsample, hasMask, extra)` builds `overrides`, the FIRE value-dict. Mapping
-UI control → FIRE key (all distances → analysed px via `toAnalysedPx`):
+UI control → FIRE key (user-unit distances → analysed px via `toAnalysedPx`; the four FIRE
+internals of §4 are sent as typed):
 
 | UI control | FIRE key | Notes |
 |---|---|---|
@@ -141,12 +172,12 @@ UI control → FIRE key (all distances → analysed px via `toAnalysedPx`):
 | Max fiber width | `widMAX` | server-side width filter (0=off) |
 | Nucleation | `thresh_Dxlink` | |
 | Direction decay | `lam_dirdecay` | |
-| Direction window | `s_fiberdir` | **see §4 trap** |
-| FIRE min length | `thresh_flen` | **see §4 trap** |
-| Interp. spacing | `s_maxspace` | **see §4 trap** |
+| Direction window | `s_fiberdir` | vertices, sent as typed (§4) |
+| FIRE min length | `thresh_flen` | analysis px, sent as typed (§4) |
+| Interp. spacing | `s_maxspace` | analysis px, sent as typed (§4) |
 | Angle interval | `ang_interval` | deg |
 | Beam regularisation | `lambda` | |
-| Dangling prune | `thresh_dang_L` | **see §4 trap** |
+| Dangling prune | `thresh_dang_L` | analysis px, sent as typed (§4) |
 | Extra params (JSON) | (any) | **merged last — overrides everything above** |
 
 `meta` also carries `region {x,y,width,height,downsample}`, `fiber_mode`,
@@ -178,56 +209,30 @@ diversity-aware results window. **Consequence:** anything held fixed (a saturate
 inflated `s_fiberdir`) makes *every* combo fail the same way — so "all combos scored 0" points at a
 fixed/base parameter, not at the swept axes.
 
-## 8. Known-open issues & recommended fixes (as of 2026-08)
+## 8. Known issues and their status (updated 2026-10-20)
 
-0. **★ Thin collagen requires `sigma_im=0`; *any* smoothing >0 zeroes detection (2026-08-13,
-   confirmed cause of the 0-fiber runs).** On the liver biref image the *same* backend traced fibres
-   at `sigma_im=0` and returned `Fiber segments: 0` at *any* `sigma_im>0` — the core reports zero at
-   the nucleation/extension stage, before any Python filter, even though the server measured ~23% of
-   pixels above threshold. **This is not a unit bug** (a natural suspicion given §4): `sigma_im` is
-   sent raw by the client (no `toAnalysedPx`), forwarded untouched by the server, and consumed by
-   `fire_2d_angle.smooth()` as a `ceil(2σ)`-px Gaussian — pixels end to end, matching the label.
-   Mechanism: the image reaching FIRE is `round_mlab(smooth(im, σ))` **then** thresholded (`:308`);
-   collagen ridges are ~1-2 px wide, so a σ=1 kernel (radius 2 px) spreads the peak of a ~200-value
-   ridge below `thresh_im2` (120 in the log), the integer round pins it under, the ridge stops being
-   foreground, and nucleation gets nothing. Thick fibres survive the blur (the self-test runs at
-   `sigma_im=1` and still passes); thin ones don't. FIRE's own default is `sigma_im=0`
-   (`get_fire.py:23`; every repo template sets `"sigma_im": 0  # image smoothing (0 = off)`). Two
-   consequences: (a) smoothing is held FIXED across the two-stage Suggest search (§7), so a nonzero
-   fixed value zeroes *every* combo identically — the original "0 detected (target 91)" on every row;
-   (b) although the extension **defaults smoothing to 0** (spinner + `tmequant.smoothing` pref), a
-   manual change persists and silently keeps killing detection. **Immediate fix:** set `sigma_im=0`
-   for thin collagen (raise above 0 only for thick/noisy fibres). **Product fixes:** keep the default
-   at 0 and make the control clearer ("0 = off, best for thin fibres"); include `sigma_im` in the
-   Suggest search (or retry `sigma_im=0` before reporting 0); warn in the preview when a run returns
-   0 with `sigma_im>0`. **Note — retraction:** an earlier same-day hypothesis blamed the Windows
-   `cp314-mingw` build vs the Linux `cp310` `.so`. That was a **confounded comparison** — local was
-   `sigma_im=0`, remote nonzero; the *same* local binary also returns 0 at `sigma_im>0`. Source and
-   both binaries are at commit `4692493`; the Python 3.10-vs-3.14 build difference was **not** the
-   cause. (An intermediate correction here mistakenly said to *raise* smoothing to ≥2 — backwards;
-   the working value is 0.)
-1. **Advanced structural params treated as µm (§4).** Recommended: reclassify `s_fiberdir`,
-   `s_maxspace`, `thresh_flen`, `thresh_dang_L` (and review `s_xlinkbox`, `thresh_linkd`) as
-   **pixel** quantities at CT-FIRE's native scale — either send them un-converted, or default them
-   from the server (as the self-test does by omitting them). Lowering `s_fiberdir` is the single
-   highest-value change to try.
-2. **Advanced defaults exceed real fiber size** (FIRE min length / dangling prune = 30 µm on
-   ~13 µm fibers). Make calibration-aware or smaller.
-3. **Unit-blind persistence.** Spatial prefs store one number with no µm/px tag, so a value saved
-   on a px image reloads as µm. Recommended: unit-scoped persistence.
-4. **`normHi` on huge/sparse regions.** The floor (§3) bounds `thresh_im2`, but the *mask* still
-   uses the low percentile `normHi`; consider a higher percentile (99.9) or a foreground-aware
-   white point so the displayed grayscale isn't over-clipped.
+0. **Smoothing above 0 gave 0 fibres: fixed 2026-09-12, in tme-quant.** The cause was
+   `fire_2d_angle.smooth()` convolving the size-1 channel axis of the `(1, J, I)` image with zero
+   padding, which scaled the whole image to about 40% (see the note at the top). The 2026-08-13
+   entry that stood here called it "not a unit bug" and blamed the blur itself; that explanation
+   was wrong, and its advice to keep `sigma_im = 0` on thin collagen is not needed with the fix. The fix is still an uncommitted change in the
+   tme-quant checkout (`src/ctfire_py/fire_2d_angle.py` and its twin); commit it there before
+   relying on a fresh clone.
+1. **Advanced structural params treated as µm: fixed in 0.2.4** (§4). `s_fiberdir` is a vertex
+   count; `thresh_flen`, `s_maxspace` and `thresh_dang_L` are analysis px. All four are sent as
+   typed. `s_xlinkbox` and `thresh_linkd` stay in the user unit: both are real distances in the
+   image (a search box, a gap), so following the pixel size is right for them.
+2. **Advanced defaults exceeded real fiber size: fixed in 0.2.4.** The defaults are FIRE's own
+   (4, 15, 5, 15), so FIRE min length no longer overrides **Min fiber length**.
+3. **Unit-blind persistence: fixed in 0.2.4** (§4, *Unit-scoped persistence*).
+4. **`normHi` over-clipping the mask on huge/sparse regions: fixed in 0.2.4** (§3): the mask's
+   white point covers the bright collagen, and its threshold is mapped through the same value.
 
 ## 9. Debugging checklist for "0 fibers"
 
-0. **Check smoothing first (§8.0).** If a real region returns 0, set **Smoothing (`sigma_im`) = 0**
-   and re-run before anything else — on thin collagen *any* smoothing >0 collapses nucleation to
-   `Fiber segments: 0` even with plenty of foreground. If Suggest returns "0 detected" on *every*
-   combo, that's a fixed nonzero smoothing killing the whole grid; set it to 0 and re-search. (A
-   whole-machine "traces nothing" that `sigma_im=0` does *not* fix, where a known-good server traces
-   the byte-identical exported tile, would point at the compiled build — but the 2026-08 case was
-   smoothing.)
+0. **Check smoothing (§8.0).** If every run at Smoothing > 0 returns `Fiber segments: 0` and
+   Smoothing = 0 traces, the server is running a tme-quant without the 2026-09-12 `smooth()` fix.
+   Apply it (or set Smoothing to 0) and restart the server.
 1. `Ping` says `real`? If synthetic → engine not loaded (`04`).
 2. Run **Self-test fiber engine** → PASS means the engine *loads and traces the synthetic image*.
    Note: a PASS does **not** prove the build traces *real* images correctly (§8.0) — it only rules

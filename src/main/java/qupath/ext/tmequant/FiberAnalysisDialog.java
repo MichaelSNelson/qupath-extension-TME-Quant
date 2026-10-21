@@ -144,6 +144,10 @@ public final class FiberAnalysisDialog {
     private boolean calibrated;
     private double pixelSizeMicrons;
     private String unit; // "um" or "px"
+    /** Reload each per-unit distance spinner from the store for the current unit. */
+    private final List<Runnable> unitReloaders = new ArrayList<>();
+    /** Rewrite each label that names the unit. */
+    private final List<Runnable> unitRelabelers = new ArrayList<>();
 
     private ChoiceBox<String> channelBox;
     private ChoiceBox<String> previewScopeBox; // one tile (fast) vs whole region
@@ -158,15 +162,15 @@ public final class FiberAnalysisDialog {
     private CheckBox thicknessWidthCheck;    // draw viewer-overlay fibres at their estimated thickness
     // While set (during the 2nd pass), the threshold→FIRE mapping uses this instead of the spinner,
     // so a second detection pass runs at a higher threshold without disturbing the visible control.
-    private volatile Double thresholdOverride;
+    private volatile Double thresholdOverrideNative;
     // Global intensity reference (native units) computed once per channel, shared by
     // every tile so the scale + threshold are consistent (no per-tile noise blow-up).
-    private double normLo = 0;
-    private double normHi = 255;
-    private double statMin = 0;
-    private double statMax = 255;
-    private double[] statSample = new double[0];
-    private double[] tileSample = new double[0]; // native samples of the SELECTED tile (per-tile %)
+    private double normLoNative = 0;
+    private double normHiNative = 255;
+    private double statMinNative = 0;
+    private double statMaxNative = 255;
+    private double[] statSampleNative = new double[0];
+    private double[] tileSampleNative = new double[0]; // native samples of the SELECTED tile (per-tile %)
     private Spinner<Double> minLenSpinner; // um or px
     private Spinner<Double> seedSpacingSpinner; // µm (calibrated) / full-res px — downsample-independent
     private ChoiceBox<String> fiberModeBox;
@@ -236,12 +240,14 @@ public final class FiberAnalysisDialog {
     // advanced parity knobs (live in the FIRE-only backend; pipeline defaults)
     private Spinner<Double> dxlinkSpinner; // thresh_Dxlink
     private Spinner<Double> dirDecaySpinner; // lam_dirdecay
-    private Spinner<Double> fiberDirSpinner; // s_fiberdir — µm (calibrated) / full-res px
-    private Spinner<Double> fireFlenSpinner; // thresh_flen — µm (calibrated) / full-res px
-    private Spinner<Double> maxSpaceSpinner; // s_maxspace — µm (calibrated) / full-res px
+    // These four are in FIRE's own units and sent as typed (no µm conversion): their spinner names
+    // say so. Every other distance spinner is in the dialog's user unit (unitLabel()).
+    private Spinner<Double> fiberDirVerticesSpinner; // s_fiberdir — a count of trace vertices
+    private Spinner<Double> fireFlenAnalysedPxSpinner; // thresh_flen — analysis px
+    private Spinner<Double> maxSpaceAnalysedPxSpinner; // s_maxspace — analysis px
     private Spinner<Double> angIntervalSpinner; // ang_interval (deg)
     private Spinner<Double> lambdaSpinner; // lambda (regularisation)
-    private Spinner<Double> dangLenSpinner; // thresh_dang_L — µm (calibrated) / full-res px
+    private Spinner<Double> dangLenAnalysedPxSpinner; // thresh_dang_L — analysis px
     // Suggest/tuner options
     private Spinner<Double> countTolSpinner; // count tolerance band (percent)
     private Spinner<Integer> maxRoundsSpinner; // iterative refinement rounds
@@ -296,6 +302,11 @@ public final class FiberAnalysisDialog {
     // read once per channel/downsample and used by BOTH the live threshold mask and
     // the fiber preview. lastBgRatio = analysisDownsample / backgroundDownsample.
     private BufferedImage lastBgGray;
+    /** The native white point {@link #lastBgGray} was scaled with; its mask maps the threshold
+     *  through this same value (see {@link #displayNormHiNative}). */
+    private double lastBgWhitePointNative = 255;
+    /** The same for {@code pickedTileGray}. */
+    private double pickedTileWhitePointNative = 255;
     private javafx.scene.image.Image lastBgFx;
     private int lastBgW;
     private int lastBgH;
@@ -311,8 +322,8 @@ public final class FiberAnalysisDialog {
     private int maskTileLoadGen = 0;      // generation guard so stale tile reads are ignored
     private boolean maskTileLoading = false;
     private javafx.scene.image.Image pickedTileOverlay; // cached red overlay (rebuild only on change)
-    private int pickedTileOverlayThr = Integer.MIN_VALUE;
-    private double pickedTileOverlaySigma = -1;
+    private int pickedTileOverlayThrGray8 = Integer.MIN_VALUE;
+    private double pickedTileOverlaySigmaAnalysedPx = -1;
     private Button backToFullBtn;         // "Clear overlay" in the fiber-detection section
     private Button clearOverlayThreshBtn; // "Clear overlay" twin in the ① threshold section
 
@@ -392,7 +403,11 @@ public final class FiberAnalysisDialog {
         this.imageData = newData;
         this.server = newData.getServer();
         this.hierarchy = newData.getHierarchy();
+        String unitBefore = unit;
         recomputeCalibration();
+        if (!unit.equals(unitBefore)) {
+            onUnitChanged();
+        }
         updateTileSizeLabel(); // µm value depends on the new image's pixel size
         // 3. Adopt the new image's current selection (honour whole-image mode).
         boolean whole = wholeImageCheck != null && wholeImageCheck.isSelected();
@@ -549,12 +564,13 @@ public final class FiberAnalysisDialog {
         // threshold spinner in NATIVE units (the same values shown when mousing over
         // the image) with a sensible default and a live "% above" feedback label.
         computeStats(chosenChannel());
-        double step = Math.max((statMax - statMin) / 100.0, 1e-6);
-        thresholdSpinner = spinnerD(statMin, statMax, defaultThreshold(), step);
+        double step = Math.max((statMaxNative - statMinNative) / 100.0, 1e-6);
+        thresholdSpinner = spinnerD(statMinNative, statMaxNative, defaultThreshold(), step);
         thresholdFeedback = new Label();
         thresholdSpinner.valueProperty().addListener((o, ov, nv) -> {
             updateThresholdFeedback();
             redrawMask(); // live threshold mask update (no server / no FIRE)
+            refreshBackgroundIfThresholdNearWhitePoint();
         });
         // Two-pass detection: a 2nd pass at another threshold, merged + de-duped with the first.
         // The 2nd threshold may be HIGHER (carve thick bright bundles so their internal striations
@@ -571,8 +587,8 @@ public final class FiberAnalysisDialog {
                         + "HIGHER 2nd threshold: carves thick bright bundles so their internal striations "
                         + "become traceable ridges instead of FIRE tracing across the bundle.\n"
                         + "Slower (two full runs). TACS is ignored in two-pass mode."));
-        secondThresholdSpinner = spinnerD(statMin, statMax,
-                Math.min(statMax, defaultThreshold() * 2.0), step);
+        secondThresholdSpinner = spinnerD(statMinNative, statMaxNative,
+                Math.min(statMaxNative, defaultThreshold() * 2.0), step);
         secondThresholdSpinner.setTooltip(ttip(
                 "Background threshold for pass 2; either side of the main threshold works.\n"
                         + "LOWER (dim fibres): start ~10% below the main threshold and watch the ① mask "
@@ -623,9 +639,9 @@ public final class FiberAnalysisDialog {
             refreshBackground();
         });
         // min length default: ~15 um if calibrated, else 30 px
-        double minLenDefault = calibrated ? 15.0 : 30.0;
-        double minLenMax = calibrated ? 1000.0 : 400.0;
-        minLenSpinner = spinnerD(1.0, minLenMax, minLenDefault, calibrated ? 1.0 : 5.0);
+        double minLenDefaultUserUnit = calibrated ? 15.0 : 30.0;
+        double minLenMaxUserUnit = calibrated ? 1000.0 : 400.0;
+        minLenSpinner = spinnerD(1.0, minLenMaxUserUnit, minLenDefaultUserUnit, calibrated ? 1.0 : 5.0);
         // Seed spacing in microns (calibrated) / full-res px: converted to analysed px at
         // run time so the physical spacing is unaffected by the downsample. Default 16 µm
         // ≈ the old 8-analysed-px default at downsample 4 and ~0.5 µm/px.
@@ -656,9 +672,9 @@ public final class FiberAnalysisDialog {
                 "The tumour-stroma boundary outline (a separate annotation inside the analysis region). "
                         + "Fibers are classified by their angle and distance relative to this outline."));
         boundaryBox.disableProperty().bind(tacsCheck.selectedProperty().not());
-        double zoneDefault = calibrated ? 100.0 : 100.0;
-        double zoneMax = calibrated ? 2000.0 : 1000.0;
-        tacsZoneSpinner = spinnerD(1.0, zoneMax, zoneDefault, calibrated ? 5.0 : 5.0);
+        double zoneDefaultUserUnit = calibrated ? 100.0 : 100.0;
+        double zoneMaxUserUnit = calibrated ? 2000.0 : 1000.0;
+        tacsZoneSpinner = spinnerD(1.0, zoneMaxUserUnit, zoneDefaultUserUnit, calibrated ? 5.0 : 5.0);
         tacsZoneSpinner.disableProperty().bind(tacsCheck.selectedProperty().not());
 
         detectionsCheck = new CheckBox("Create detections (not annotations)");
@@ -755,12 +771,13 @@ public final class FiberAnalysisDialog {
         // Advanced parity knobs — pipeline defaults so adding them changes nothing until touched.
         dxlinkSpinner = spinnerD(0.0, 10.0, 1.0, 0.1); // thresh_Dxlink
         dirDecaySpinner = spinnerD(0.0, 1.0, 0.3, 0.05); // lam_dirdecay; fit-tuned default (was 0.5)
-        fiberDirSpinner = spinnerD(2.0, 40.0, 6.0, 1.0); // s_fiberdir (µm)
-        fireFlenSpinner = spinnerD(0.0, 200.0, 30.0, 1.0); // thresh_flen (µm)
-        maxSpaceSpinner = spinnerD(1.0, 60.0, 10.0, 1.0); // s_maxspace (µm)
+        // FIRE's own units and defaults (ct_fire.py), sent unconverted: see FiberSocketPreferences.
+        fiberDirVerticesSpinner = spinnerD(2.0, 20.0, 4.0, 1.0); // s_fiberdir (vertices)
+        fireFlenAnalysedPxSpinner = spinnerD(0.0, 200.0, 15.0, 1.0); // thresh_flen (analysis px)
+        maxSpaceAnalysedPxSpinner = spinnerD(1.0, 60.0, 5.0, 1.0); // s_maxspace (analysis px)
         angIntervalSpinner = spinnerD(1.0, 30.0, 5.0, 1.0); // ang_interval (deg)
         lambdaSpinner = spinnerD(0.0, 1.0, 0.01, 0.01); // lambda
-        dangLenSpinner = spinnerD(0.0, 200.0, 30.0, 1.0); // thresh_dang_L (µm)
+        dangLenAnalysedPxSpinner = spinnerD(0.0, 200.0, 15.0, 1.0); // thresh_dang_L (analysis px)
         dxlinkSpinner.setTooltip(ttip(
                 "Nucleation distance threshold (thresh_Dxlink): how strong a distance-map peak must "
                         + "be to seed a fiber. HIGHER = only thick/bright ridge cores seed → fewer "
@@ -773,22 +790,23 @@ public final class FiberAnalysisDialog {
                         + "almost fixed — traces stay straight and resist turning. Default 0.5. For "
                         + "wavy/curly fibers raise this AND lower Seed spacing (the vertices must be "
                         + "close enough to bend between)."));
-        fiberDirSpinner.setTooltip(ttip(
-                "Window used to estimate a fiber's local direction (s_fiberdir), in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
-                        + " — converted to analysis pixels at run time. LARGER = smoother, steadier "
-                        + "heading (averages more past vertices); SMALLER = heading reacts to local bends."));
-        fireFlenSpinner.setTooltip(ttip(
-                "FIRE's own short-fiber removal length (thresh_flen), in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
-                        + ", applied inside the backend during linking. HIGHER removes more short "
-                        + "vertex-chains (fewer short fibers); lower keeps them. Distinct from 'Min "
-                        + "fiber length' (the post-trace LL1 filter)."));
-        maxSpaceSpinner.setTooltip(ttip(
-                "Vertex spacing when resampling each fiber centerline (s_maxspace), in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
-                        + ". LARGER = coarser centerline / bridges bigger gaps; SMALLER = finer, more "
-                        + "vertices. Geometry only — doesn't change how many fibers are found."));
+        fiberDirVerticesSpinner.setTooltip(ttip(
+                "How many vertices back along a fiber its local direction is taken from "
+                        + "(s_fiberdir) — a COUNT of trace vertices, not a distance, so it is sent to "
+                        + "FIRE as typed. LARGER = smoother, steadier heading; SMALLER = the heading "
+                        + "reacts to local bends. FIRE's default is 4; the minimum is 2."));
+        fireFlenAnalysedPxSpinner.setTooltip(ttip(
+                "FIRE's own short-fiber removal length (thresh_flen), in analysis pixels (pixels of "
+                        + "the image FIRE receives, at the current downsample), applied inside the "
+                        + "backend during linking. HIGHER removes more short vertex-chains (fewer short "
+                        + "fibers); lower keeps them. FIRE's default is 15. Keep it at or below 'Min "
+                        + "fiber length' (the post-trace LL1 filter, in your unit), which is the "
+                        + "length cut to tune."));
+        maxSpaceAnalysedPxSpinner.setTooltip(ttip(
+                "Vertex spacing when resampling each fiber centerline (s_maxspace), in analysis "
+                        + "pixels (pixels of the image FIRE receives, at the current downsample). "
+                        + "LARGER = coarser centerline; SMALLER = finer, more vertices. Geometry only "
+                        + "— doesn't change how many fibers are found. FIRE's default is 5."));
         angIntervalSpinner.setTooltip(ttip(
                 "Angle sampling interval (ang_interval, degrees) for per-fiber angle/orientation. "
                         + "SMALLER = finer sampling (higher orientation/TACS resolution); LARGER = "
@@ -797,10 +815,9 @@ public final class FiberAnalysisDialog {
                 "Beam-fit regularisation / spline tension (lambda) in fiber interpolation. HIGHER = "
                         + "stiffer, straighter centerline; LOWER = follows every wiggle. Geometry only "
                         + "— doesn't change the fiber count. Default 0.01."));
-        dangLenSpinner.setTooltip(ttip(
-                "Dangling-end pruning length (thresh_dang_L), in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
-                        + ": short end-spurs up to this length would be trimmed. NOTE: currently "
+        dangLenAnalysedPxSpinner.setTooltip(ttip(
+                "Dangling-end pruning length (thresh_dang_L), in analysis pixels: short end-spurs "
+                        + "up to this length would be trimmed. FIRE's default is 15. NOTE: currently "
                         + "INACTIVE — this build runs dangler removal in MATLAB-faithful mode (a no-op), "
                         + "so this value has no effect."));
 
@@ -844,7 +861,7 @@ public final class FiberAnalysisDialog {
                         + "(Different from 'Seed spacing', which sets how far apart seeds must be.)"));
         xlinkBoxSpinner.setTooltip(ttip(
                 "Search-box radius (s_xlinkbox) used when finding nucleation points / cross-links, in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
+                        + "microns (full-resolution pixels on an uncalibrated image)"
                         + " — converted to analysis pixels at run time, so it stays fixed when you "
                         + "change the downsample. Larger merges nearby maxima into one seed; smaller "
                         + "keeps them separate. Default 6 µm ≈ the pipeline default 3 px at downsample 4."));
@@ -859,7 +876,7 @@ public final class FiberAnalysisDialog {
                         + "Default 70°."));
         linkDistSpinner.setTooltip(ttip(
                 "Largest gap (thresh_linkd) that can be bridged to join two fiber pieces into one, in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
+                        + "microns (full-resolution pixels on an uncalibrated image)"
                         + ". Raise to connect fragmented bundles; lower if separate fibers merge."));
         linkAngleSpinner.setTooltip(ttip(
                 "How far from straight two pieces may bend and still be joined, in degrees (maps to "
@@ -870,7 +887,7 @@ public final class FiberAnalysisDialog {
         // than this are dropped. 0 disables the filter.
         maxWidthSpinner.setTooltip(ttip(
                 "Drops detected fibers whose estimated width exceeds this value (widMAX), in "
-                        + (calibrated ? "microns" : "full-resolution pixels")
+                        + "microns (full-resolution pixels on an uncalibrated image)"
                         + " — useful for rejecting thick blob/vessel detections that aren't true fibers. "
                         + "Lower it if wide artefacts slip through; set high (or to the max) to keep all. "
                         + "0 disables it. Applied after tracing, on the server."));
@@ -897,7 +914,7 @@ public final class FiberAnalysisDialog {
         wirePreferences();
         minLenSpinner.setTooltip(ttip(
                 "Fibers shorter than this are discarded after tracing (LL1), in "
-                        + (calibrated ? "microns" : "pixels")
+                        + "microns (full-resolution pixels on an uncalibrated image)"
                         + ". Raise to drop noise specks/fragments; lower to keep short fibers."));
         seedSpacingSpinner.setTooltip(ttip(
                 "IMPACT ON RESULTS: LOWER = more fibres detected and traces follow CURVES closely; "
@@ -909,7 +926,7 @@ public final class FiberAnalysisDialog {
                         + "of the vertices along each traced fibre. It is NOT a minimum separation "
                         + "between two distinct fibres. Too high and FIRE places too few points to land "
                         + "on every fibre or to bend around its curves.\n"
-                        + "In " + (calibrated ? "microns" : "full-resolution pixels")
+                        + "In " + "microns (full-resolution pixels on an uncalibrated image)"
                         + " (converted to analysis pixels at run time, so it stays fixed when you change "
                         + "downsample). Lower costs more memory/time. Tip: set it near your fibre width "
                         + "or a fraction of your shortest fibre."));
@@ -920,7 +937,7 @@ public final class FiberAnalysisDialog {
                         + "Preview and the committed result both use this value."));
         tacsZoneSpinner.setTooltip(ttip(
                 "Fibers whose centre is within this distance of the boundary are TACS-classified; "
-                        + "those farther away are left unclassified (" + (calibrated ? "microns" : "pixels")
+                        + "those farther away are left unclassified (" + "microns (full-resolution pixels on an uncalibrated image)"
                         + "). Widen to include more stroma; narrow to focus on the peri-tumoural rim."));
 
         // ===================================================================
@@ -1104,9 +1121,9 @@ public final class FiberAnalysisDialog {
                 + "Both produce the same measurements (length, angle, straightness, width mean/max/SD) "
                 + "and both work with Preview."));
         rememberCombo(tracerCombo, FiberSocketPreferences.tracerProperty());
-        rememberSpinner(flowParallelSpinner, FiberSocketPreferences.flowParallelProperty());
+        rememberPerUnit(flowParallelSpinner, FiberSocketPreferences.flowParallelProperty());
         t2.addRow(r2++, lbl("Tracer"), tracerCombo);
-        javafx.scene.control.Label flowParLbl = lbl("Parallel fibre distance");
+        javafx.scene.control.Label flowParLbl = unitLbl("Parallel fibre distance (%s)");
         t2.addRow(r2++, flowParLbl, flowParallelSpinner);
         // Only meaningful for the flow tracer; grey it out otherwise rather than hide it, so the
         // control does not jump around when the tracer changes.
@@ -1145,19 +1162,19 @@ public final class FiberAnalysisDialog {
         t2.addRow(r2++, lbl("Detection preset"), presetCombo);
         t2.add(presetWarn, 0, r2++, 2, 1);
         t2.add(depNote, 0, r2++, 2, 1);
-        t2.addRow(r2++, lbl("Seed spacing (" + unitLabel() + ", lower = denser seeding)"), seedSpacingSpinner);
+        t2.addRow(r2++, unitLbl("Seed spacing (%s, lower = denser seeding)"), seedSpacingSpinner);
         t2.addRow(r2++, lbl("Seed sensitivity (lower = more fibers)"), seedSensSpinner);
-        t2.addRow(r2++, lbl("Cross-link search box (" + unitLabel() + ")"), xlinkBoxSpinner);
+        t2.addRow(r2++, unitLbl("Cross-link search box (%s)"), xlinkBoxSpinner);
         t2.addRow(r2++, lbl("Max bend angle (deg, higher = curvier fibers)"), bendAngleSpinner);
         t2.addRow(r2++, lbl("Angle-extend threshold (deg)"), angleExtendSpinner);
         t2.addRow(r2++, lbl("Max link angle (deg, higher = links sharper turns)"), linkAngleSpinner);
         t2.add(linkAngleNote, 0, r2++, 2, 1);
-        t2.addRow(r2++, lbl("Min fiber length (" + unitLabel() + ")"), minLenSpinner);
+        t2.addRow(r2++, unitLbl("Min fiber length (%s)"), minLenSpinner);
         t2.addRow(r2++, lbl("Fiber mode"), fiberModeBox);
         t2.add(sep(), 0, r2++, 2, 1);
         t2.add(tacsCheck, 0, r2++, 2, 1);
         t2.addRow(r2++, lbl("Boundary annotation"), boundaryBox);
-        t2.addRow(r2++, lbl("TACS zone width (" + unitLabel() + ")"), tacsZoneSpinner);
+        t2.addRow(r2++, unitLbl("TACS zone width (%s)"), tacsZoneSpinner);
 
         // Advanced (collapsible) — the rest of the detection knobs.
         GridPane adv = new GridPane();
@@ -1167,24 +1184,23 @@ public final class FiberAnalysisDialog {
         adv.getColumnConstraints().addAll(labelCol(), fieldCol());
         for (var ctl : new javafx.scene.control.Control[] {
             distSmoothSpinner, linkDistSpinner, maxWidthSpinner,
-            dxlinkSpinner, dirDecaySpinner, fiberDirSpinner, fireFlenSpinner,
-            maxSpaceSpinner, angIntervalSpinner, lambdaSpinner, dangLenSpinner
+            dxlinkSpinner, dirDecaySpinner, fiberDirVerticesSpinner, fireFlenAnalysedPxSpinner,
+            maxSpaceAnalysedPxSpinner, angIntervalSpinner, lambdaSpinner, dangLenAnalysedPxSpinner
         }) {
             ctl.setMaxWidth(Double.MAX_VALUE);
         }
         int ar = 0;
-        String u = unitLabel();
         adv.addRow(ar++, new Label("Distance smoothing (sigma, px)"), distSmoothSpinner);
-        adv.addRow(ar++, new Label("Link distance (" + u + ")"), linkDistSpinner);
-        adv.addRow(ar++, new Label("Max fiber width (" + u + ")"), maxWidthSpinner);
+        adv.addRow(ar++, unitLbl("Link distance (%s)"), linkDistSpinner);
+        adv.addRow(ar++, unitLbl("Max fiber width (%s)"), maxWidthSpinner);
         adv.addRow(ar++, new Label("Nucleation threshold"), dxlinkSpinner);
         adv.addRow(ar++, new Label("Direction decay"), dirDecaySpinner);
-        adv.addRow(ar++, new Label("Direction window (" + u + ")"), fiberDirSpinner);
-        adv.addRow(ar++, new Label("FIRE min length (" + u + ")"), fireFlenSpinner);
-        adv.addRow(ar++, new Label("Interp. spacing (" + u + ")"), maxSpaceSpinner);
+        adv.addRow(ar++, new Label("Direction window (vertices)"), fiberDirVerticesSpinner);
+        adv.addRow(ar++, new Label("FIRE min length (analysis px)"), fireFlenAnalysedPxSpinner);
+        adv.addRow(ar++, new Label("Interp. spacing (analysis px)"), maxSpaceAnalysedPxSpinner);
         adv.addRow(ar++, new Label("Angle interval (deg)"), angIntervalSpinner);
         adv.addRow(ar++, new Label("Beam regularisation"), lambdaSpinner);
-        adv.addRow(ar++, new Label("Dangling prune (" + u + ")"), dangLenSpinner);
+        adv.addRow(ar++, new Label("Dangling prune (analysis px)"), dangLenAnalysedPxSpinner);
         adv.add(ridgeCheck, 0, ar++, 2, 1); // experimental detection MODE — tucked in Advanced
         Label extraLabel = new Label("Extra params (JSON)");
         extraLabel.setWrapText(true);
@@ -1641,6 +1657,16 @@ public final class FiberAnalysisDialog {
         return l;
     }
 
+    /**
+     * A label naming the dialog's distance unit through {@code %s} ("um" or "px"), rewritten by
+     * {@link #onUnitChanged()} when the dialog moves to an image with the other calibration.
+     */
+    private Label unitLbl(String format) {
+        Label l = lbl(String.format(format, unitLabel()));
+        unitRelabelers.add(() -> l.setText(String.format(format, unitLabel())));
+        return l;
+    }
+
     /** A tooltip that WRAPS long text (bounded width) instead of running off the screen edge. */
     private static Tooltip ttip(String text) {
         Tooltip t = new Tooltip(text);
@@ -1814,29 +1840,29 @@ public final class FiberAnalysisDialog {
     // ---- persistent preferences: remember image-independent field values ----
     private void wirePreferences() {
         rememberD(downsampleSpinner, FiberSocketPreferences.downsampleProperty());
-        rememberD(minLenSpinner, FiberSocketPreferences.minLengthProperty());
-        rememberD(seedSpacingSpinner, FiberSocketPreferences.seedSpacingProperty());
+        rememberPerUnit(minLenSpinner, FiberSocketPreferences.minLengthProperty());
+        rememberPerUnit(seedSpacingSpinner, FiberSocketPreferences.seedSpacingProperty());
         rememberD(smoothingSpinner, FiberSocketPreferences.smoothingProperty());
         rememberD(distSmoothSpinner, FiberSocketPreferences.distSmoothingProperty());
         rememberD(seedSensSpinner, FiberSocketPreferences.seedSensitivityProperty());
-        rememberD(xlinkBoxSpinner, FiberSocketPreferences.xlinkBoxProperty());
+        rememberPerUnit(xlinkBoxSpinner, FiberSocketPreferences.xlinkBoxProperty());
         rememberD(bendAngleSpinner, FiberSocketPreferences.bendAngleProperty());
         rememberD(angleExtendSpinner, FiberSocketPreferences.angleExtendProperty());
-        rememberD(linkDistSpinner, FiberSocketPreferences.linkDistanceProperty());
+        rememberPerUnit(linkDistSpinner, FiberSocketPreferences.linkDistanceProperty());
         rememberD(linkAngleSpinner, FiberSocketPreferences.linkAngleProperty());
-        rememberD(maxWidthSpinner, FiberSocketPreferences.maxWidthProperty());
+        rememberPerUnit(maxWidthSpinner, FiberSocketPreferences.maxWidthProperty());
         rememberD(dxlinkSpinner, FiberSocketPreferences.dxlinkProperty());
         rememberD(dirDecaySpinner, FiberSocketPreferences.dirDecayProperty());
-        rememberD(fiberDirSpinner, FiberSocketPreferences.fiberDirProperty());
-        rememberD(fireFlenSpinner, FiberSocketPreferences.fireFlenProperty());
-        rememberD(maxSpaceSpinner, FiberSocketPreferences.maxSpaceProperty());
+        rememberD(fiberDirVerticesSpinner, FiberSocketPreferences.fiberDirVerticesProperty());
+        rememberD(fireFlenAnalysedPxSpinner, FiberSocketPreferences.fireFlenAnalysedPxProperty());
+        rememberD(maxSpaceAnalysedPxSpinner, FiberSocketPreferences.maxSpaceAnalysedPxProperty());
         rememberD(angIntervalSpinner, FiberSocketPreferences.angIntervalProperty());
         rememberD(lambdaSpinner, FiberSocketPreferences.lambdaProperty());
-        rememberD(dangLenSpinner, FiberSocketPreferences.dangLenProperty());
+        rememberD(dangLenAnalysedPxSpinner, FiberSocketPreferences.dangLenAnalysedPxProperty());
         rememberD(countTolSpinner, FiberSocketPreferences.countTolProperty());
         rememberI(maxRoundsSpinner, FiberSocketPreferences.maxRoundsProperty());
         rememberChoice(pieceWeightBox, FiberSocketPreferences.pieceWeightProperty());
-        rememberD(tacsZoneSpinner, FiberSocketPreferences.tacsZoneProperty());
+        rememberPerUnit(tacsZoneSpinner, FiberSocketPreferences.tacsZoneProperty());
         rememberChoice(previewScopeBox, FiberSocketPreferences.previewScopeProperty());
         rememberText(extraParamsArea, FiberSocketPreferences.extraParamsProperty());
         // fiberMode pref stores the FIRE mode (1/2), not the box index (0=Merged,1=Segments).
@@ -1851,6 +1877,50 @@ public final class FiberAnalysisDialog {
                 FiberSocketPreferences.setCollagenChannel(nv.intValue());
             }
         });
+    }
+
+    /**
+     * Remember a distance spinner in the dialog's user unit. The value is stored once per unit,
+     * written to the store for the CURRENT image's calibration, and re-read by
+     * {@link #onUnitChanged()} when the dialog moves to an image with the other calibration, so a
+     * value tuned in pixels never comes back as microns.
+     */
+    private void rememberPerUnit(Spinner<Double> sp, FiberSocketPreferences.UnitScopedDouble pref) {
+        if (sp == null) {
+            return;
+        }
+        Runnable load = () -> {
+            try {
+                setSpinnerValue(sp, pref.forUnit(calibrated).get());
+            } catch (RuntimeException ignored) {
+                // stored value outside this spinner's range: keep the current one
+            }
+        };
+        load.run();
+        unitReloaders.add(load);
+        sp.valueProperty().addListener((o, ov, nv) -> {
+            if (nv != null) {
+                pref.forUnit(calibrated).set(nv);
+            }
+        });
+    }
+
+    /**
+     * The dialog moved to an image with the other calibration (µm vs px): show the values stored
+     * for the new unit and name it in every label. Preset guard on, so reloading Seed spacing does
+     * not flip the detection preset to Custom.
+     */
+    private void onUnitChanged() {
+        boolean was = applyingPreset;
+        applyingPreset = true;
+        try {
+            unitReloaders.forEach(Runnable::run);
+        } finally {
+            applyingPreset = was;
+        }
+        unitRelabelers.forEach(Runnable::run);
+        logger.info("TME Quant: this image is in {}, so the distance settings now show the values "
+                + "last used in {}.", unitLabel(), unitLabel());
     }
 
     private static void rememberD(Spinner<Double> sp, javafx.beans.property.DoubleProperty pref) {
@@ -1941,11 +2011,11 @@ public final class FiberAnalysisDialog {
         try {
             // Sample near the mask's own resolution (~1024 px). A coarser sample averages thin
             // bright collagen into its dark surroundings, which (a) makes "% above" read far lower
-            // than the mask actually shows and (b) pulls the 99.5th-percentile white point (normHi)
+            // than the mask actually shows and (b) pulls the 99.5th-percentile white point (normHiNative)
             // too low, washing out the grayscale image FIRE traces. Matching the mask keeps the
             // reported fraction, the threshold, and the FIRE input consistent.
             // Sample at the SELECTED downsample when the region is small enough to preview faithfully
-            // (so normHi matches exactly what FIRE sees, and preview == analysis); for a large region
+            // (so normHiNative matches exactly what FIRE sees, and preview == analysis); for a large region
             // fall back to a coarser, bounded sample -- the same resolution as the too-large thumbnail.
             double d = downsampleSpinner != null ? downsampleSpinner.getValue() : 1.0;
             int statDown;
@@ -1976,18 +2046,18 @@ public final class FiberAnalysisDialog {
             if (f.length == 0) {
                 return;
             }
-            statSample = f;
+            statSampleNative = f;
             double[] sorted = f.clone();
             java.util.Arrays.sort(sorted);
-            statMin = sorted[0];
-            statMax = sorted[sorted.length - 1];
-            normLo = statMin;
-            normHi = percentile(sorted, 0.995); // robust white point (ignore hot pixels)
-            if (normHi <= normLo) {
-                normHi = statMax > normLo ? statMax : normLo + 1.0;
+            statMinNative = sorted[0];
+            statMaxNative = sorted[sorted.length - 1];
+            normLoNative = statMinNative;
+            normHiNative = percentile(sorted, 0.995); // robust white point (ignore hot pixels)
+            if (normHiNative <= normLoNative) {
+                normHiNative = statMaxNative > normLoNative ? statMaxNative : normLoNative + 1.0;
             }
             logger.info("TME Quant stats: channel={} min={} max={} normHi(99.5%)={}",
-                    channel, statMin, statMax, normHi);
+                    channel, statMinNative, statMaxNative, normHiNative);
         } catch (Exception e) {
             logger.warn("Could not compute channel stats", e);
         }
@@ -2002,16 +2072,16 @@ public final class FiberAnalysisDialog {
     }
 
     private double defaultThreshold() {
-        if (statSample.length == 0) {
-            return normLo;
+        if (statSampleNative.length == 0) {
+            return normLoNative;
         }
-        double[] sorted = statSample.clone();
+        double[] sorted = statSampleNative.clone();
         java.util.Arrays.sort(sorted);
         return percentile(sorted, 0.80); // keep ~ brightest 20% as foreground by default
     }
 
     private double fractionAbove(double t) {
-        return fractionAbove(statSample, t);
+        return fractionAbove(statSampleNative, t);
     }
 
     private static double fractionAbove(double[] sample, double t) {
@@ -2034,9 +2104,9 @@ public final class FiberAnalysisDialog {
         double t = thresholdSpinner.getValue();
         // Region average (a central patch at the analysis resolution) AND the SELECTED tile — a hot
         // tile can far exceed the region average and be the one that trips the server density guard.
-        String txt = String.format("%.1f%% of region above", fractionAbove(statSample, t) * 100.0);
-        if (tileSample != null && tileSample.length > 0) {
-            txt += String.format("   •   %.1f%% of this tile", fractionAbove(tileSample, t) * 100.0);
+        String txt = String.format("%.1f%% of region above", fractionAbove(statSampleNative, t) * 100.0);
+        if (tileSampleNative != null && tileSampleNative.length > 0) {
+            txt += String.format("   •   %.1f%% of this tile", fractionAbove(tileSampleNative, t) * 100.0);
         }
         thresholdFeedback.setText(txt);
     }
@@ -2071,7 +2141,7 @@ public final class FiberAnalysisDialog {
             }
             final double[] tsf = ts;
             Platform.runLater(() -> {
-                tileSample = tsf;
+                tileSampleNative = tsf;
                 updateThresholdFeedback();
             });
         }, "tmequant-tilesample").start();
@@ -2088,13 +2158,13 @@ public final class FiberAnalysisDialog {
      * area doesn't wipe a hand-set threshold.
      */
     private void applyStatsToThresholdSpinner(boolean resetToDefault) {
-        double step = Math.max((statMax - statMin) / 100.0, 1e-6);
+        double step = Math.max((statMaxNative - statMinNative) / 100.0, 1e-6);
         double value = resetToDefault
                 ? defaultThreshold()
-                : Math.max(statMin, Math.min(statMax, thresholdSpinner.getValue()));
+                : Math.max(statMinNative, Math.min(statMaxNative, thresholdSpinner.getValue()));
         thresholdSpinner.setValueFactory(
                 new javafx.scene.control.SpinnerValueFactory.DoubleSpinnerValueFactory(
-                        statMin, statMax, value, step));
+                        statMinNative, statMaxNative, value, step));
         updateThresholdFeedback();
     }
 
@@ -2222,14 +2292,14 @@ public final class FiberAnalysisDialog {
     /** Robust length statistics (in the user's units: µm if calibrated, else full-res px). */
     private static final class LineStats {
         final int n;
-        final double minLen;
-        final double p10;
-        final double median;
-        LineStats(int n, double minLen, double p10, double median) {
+        final double minLenUserUnit;
+        final double p10UserUnit;
+        final double medianUserUnit;
+        LineStats(int n, double minLenUserUnit, double p10UserUnit, double medianUserUnit) {
             this.n = n;
-            this.minLen = minLen;
-            this.p10 = p10;
-            this.median = median;
+            this.minLenUserUnit = minLenUserUnit;
+            this.p10UserUnit = p10UserUnit;
+            this.medianUserUnit = medianUserUnit;
         }
     }
 
@@ -2239,7 +2309,7 @@ public final class FiberAnalysisDialog {
      * Reused by 'Calibrate from traced lines' and by Suggest (to set Min length before the grid).
      */
     private LineStats measureTracedLines(List<ROI> pieceRois) {
-        java.util.List<Double> lensUser = new ArrayList<>();
+        java.util.List<Double> lensUserUnit = new ArrayList<>();
         for (ROI r : pieceRois) {
             int px = (int) Math.floor(r.getBoundsX());
             int py = (int) Math.floor(r.getBoundsY());
@@ -2257,18 +2327,18 @@ public final class FiberAnalysisDialog {
                             b.get(1).getAsDouble() - a.get(1).getAsDouble());
                 }
                 double fullResPx = arcPx * sd; // downsample-independent
-                double userLen = calibrated ? fullResPx * pixelSizeMicrons : fullResPx;
-                if (userLen > 0) {
-                    lensUser.add(userLen);
+                double lenUserUnit = calibrated ? fullResPx * pixelSizeMicrons : fullResPx;
+                if (lenUserUnit > 0) {
+                    lensUserUnit.add(lenUserUnit);
                 }
             }
         }
-        if (lensUser.size() < 3) {
+        if (lensUserUnit.size() < 3) {
             return null;
         }
-        java.util.Collections.sort(lensUser);
-        return new LineStats(lensUser.size(), lensUser.get(0),
-                percentile(lensUser, 10), percentile(lensUser, 50));
+        java.util.Collections.sort(lensUserUnit);
+        return new LineStats(lensUserUnit.size(), lensUserUnit.get(0),
+                percentile(lensUserUnit, 10), percentile(lensUserUnit, 50));
     }
 
     /**
@@ -2277,16 +2347,16 @@ public final class FiberAnalysisDialog {
      * trace it. Returns a human-readable summary of what changed. Must run on the FX thread.
      */
     private String applyLineCalibration(LineStats s) {
-        double minLenSet = clampToSpinner(minLenSpinner, 0.7 * Math.min(s.minLen, s.p10));
-        double seedSet = clampToSpinner(seedSpacingSpinner, Math.min(s.minLen / 4.0, s.median / 6.0));
-        setSpinnerValue(minLenSpinner, round1(minLenSet));
-        setSpinnerValue(seedSpacingSpinner, round1(seedSet));
-        String u = unitLabel();
+        double minLenSetUserUnit = clampToSpinner(minLenSpinner, 0.7 * Math.min(s.minLenUserUnit, s.p10UserUnit));
+        double seedSetUserUnit = clampToSpinner(seedSpacingSpinner, Math.min(s.minLenUserUnit / 4.0, s.medianUserUnit / 6.0));
+        setSpinnerValue(minLenSpinner, round1(minLenSetUserUnit));
+        setSpinnerValue(seedSpacingSpinner, round1(seedSetUserUnit));
+        String unitLabelText = unitLabel();
         return String.format(
                 "Calibrated from %d traced line(s) (median %.1f %s, shortest %.1f %s): "
                 + "Min fiber length → %.1f %s, Seed spacing → %.1f %s.",
-                s.n, round1(s.median), u, round1(s.minLen), u,
-                round1(minLenSet), u, round1(seedSet), u);
+                s.n, round1(s.medianUserUnit), unitLabelText, round1(s.minLenUserUnit), unitLabelText,
+                round1(minLenSetUserUnit), unitLabelText, round1(seedSetUserUnit), unitLabelText);
     }
 
     /** 'Calibrate from traced lines' button action. */
@@ -2365,6 +2435,10 @@ public final class FiberAnalysisDialog {
         setBusy(false, msg);
     }
 
+    /** Settings-file keys whose values are in the user unit (µm, or full-res px when uncalibrated). */
+    private static final List<String> USER_UNIT_SETTING_KEYS =
+            List.of("seedSpacing", "xlinkBox", "minLen", "tacsZone", "linkDist", "maxWidth");
+
     /** Serialize the current detection settings to a JSON object (display units). */
     private JsonObject settingsToJson() {
         JsonObject p = new JsonObject();
@@ -2387,12 +2461,12 @@ public final class FiberAnalysisDialog {
         p.addProperty("maxWidth", maxWidthSpinner.getValue());
         p.addProperty("dxlink", dxlinkSpinner.getValue());
         p.addProperty("dirDecay", dirDecaySpinner.getValue());
-        p.addProperty("fiberDir", fiberDirSpinner.getValue());
-        p.addProperty("fireFlen", fireFlenSpinner.getValue());
-        p.addProperty("maxSpace", maxSpaceSpinner.getValue());
+        p.addProperty("fiberDirVertices", fiberDirVerticesSpinner.getValue());
+        p.addProperty("fireFlenAnalysedPx", fireFlenAnalysedPxSpinner.getValue());
+        p.addProperty("maxSpaceAnalysedPx", maxSpaceAnalysedPxSpinner.getValue());
         p.addProperty("angInterval", angIntervalSpinner.getValue());
         p.addProperty("lambda", lambdaSpinner.getValue());
-        p.addProperty("dangLen", dangLenSpinner.getValue());
+        p.addProperty("dangLenAnalysedPx", dangLenAnalysedPxSpinner.getValue());
         p.addProperty("countTol", countTolSpinner.getValue());
         p.addProperty("maxRounds", maxRoundsSpinner.getValue());
         p.addProperty("pieceWeight", pieceWeightBox.getSelectionModel().getSelectedIndex());
@@ -2442,7 +2516,7 @@ public final class FiberAnalysisDialog {
 
     private void saveSettings(Stage owner) {
         JsonObject root = new JsonObject();
-        root.addProperty("tmequant_settings_version", 1);
+        root.addProperty("tmequant_settings_version", 2);
         root.addProperty("unit", unitLabel()); // µm vs px — distances are interpreted in this unit
         root.add("params", settingsToJson());
         FileChooser fc = new FileChooser();
@@ -2482,11 +2556,28 @@ public final class FiberAnalysisDialog {
             JsonObject root = JsonParser.parseReader(r).getAsJsonObject();
             JsonObject p = root.has("params") ? root.getAsJsonObject("params") : root;
             String savedUnit = root.has("unit") ? root.get("unit").getAsString() : unitLabel();
-            if (!savedUnit.equals(unitLabel())) {
+            boolean unitMatches = savedUnit.equals(unitLabel());
+            if (!unitMatches) {
+                // A distance in one unit is a different distance in the other, and with no pixel
+                // size on one side there is nothing to convert by: keep this image's own values.
+                p = p.deepCopy();
+                for (String k : USER_UNIT_SETTING_KEYS) {
+                    p.remove(k);
+                }
                 Dialogs.showWarningNotification(TITLE, String.format(
-                        "These settings were saved in '%s' but this image uses '%s'. Distance values "
-                        + "(seed spacing, link distance, lengths…) may need adjusting.",
+                        "These settings were saved on an image in '%s' but this one is in '%s', so "
+                        + "the distance settings (seed spacing, cross-link box, link distance, max "
+                        + "width, min length, TACS zone) were NOT loaded "
+                        + "and keep this image's values. Everything else was loaded.",
                         savedUnit, unitLabel()));
+            }
+            int version = root.has("tmequant_settings_version")
+                    ? root.get("tmequant_settings_version").getAsInt() : 1;
+            if (version < 2 && (p.has("fiberDir") || p.has("fireFlen") || p.has("maxSpace")
+                    || p.has("dangLen"))) {
+                Dialogs.showWarningNotification(TITLE, "This settings file is from before 0.2.4: "
+                        + "its Direction window, FIRE min length, Interp. spacing and Dangling prune "
+                        + "were in microns and are now in FIRE's own units, so they were not loaded.");
             }
             applySettingsJson(p);
             refreshBackground();
@@ -2526,12 +2617,14 @@ public final class FiberAnalysisDialog {
         setIfD(p, "maxWidth", maxWidthSpinner);
         setIfD(p, "dxlink", dxlinkSpinner);
         setIfD(p, "dirDecay", dirDecaySpinner);
-        setIfD(p, "fiberDir", fiberDirSpinner);
-        setIfD(p, "fireFlen", fireFlenSpinner);
-        setIfD(p, "maxSpace", maxSpaceSpinner);
+        // Version-1 files stored these four as "fiberDir", "fireFlen", "maxSpace" and "dangLen" in
+        // microns; those keys are deliberately not read, since the numbers mean something else now.
+        setIfD(p, "fiberDirVertices", fiberDirVerticesSpinner);
+        setIfD(p, "fireFlenAnalysedPx", fireFlenAnalysedPxSpinner);
+        setIfD(p, "maxSpaceAnalysedPx", maxSpaceAnalysedPxSpinner);
         setIfD(p, "angInterval", angIntervalSpinner);
         setIfD(p, "lambda", lambdaSpinner);
-        setIfD(p, "dangLen", dangLenSpinner);
+        setIfD(p, "dangLenAnalysedPx", dangLenAnalysedPxSpinner);
         setIfD(p, "countTol", countTolSpinner);
         if (p.has("maxRounds")) {
             int v = p.get("maxRounds").getAsInt();
@@ -2620,20 +2713,22 @@ public final class FiberAnalysisDialog {
         return a;
     }
 
-    private double fireFlenAnalysedPx(double ds) {
-        return toAnalysedPx(fireFlenSpinner.getValue(), ds);
+    // The four FIRE internals below are typed in FIRE's own units and sent as they are: they do
+    // not depend on the downsample or the pixel size (see FiberSocketPreferences for why).
+    private double fireFlenAnalysedPx() {
+        return fireFlenAnalysedPxSpinner.getValue();
     }
 
-    private double maxSpaceAnalysedPx(double ds) {
-        return Math.max(1.0, toAnalysedPx(maxSpaceSpinner.getValue(), ds));
+    private double maxSpaceAnalysedPx() {
+        return Math.max(1.0, maxSpaceAnalysedPxSpinner.getValue());
     }
 
-    private double dangLenAnalysedPx(double ds) {
-        return toAnalysedPx(dangLenSpinner.getValue(), ds);
+    private double dangLenAnalysedPx() {
+        return dangLenAnalysedPxSpinner.getValue();
     }
 
-    private int fiberDirAnalysedPx(double ds) {
-        return Math.max(2, (int) Math.round(toAnalysedPx(fiberDirSpinner.getValue(), ds)));
+    private int fiberDirVertices() {
+        return FiberParams.fiberDirVerticesForFire(fiberDirVerticesSpinner.getValue());
     }
 
     /** Parse the free-form JSON box; returns an empty object if blank. Throws on bad JSON. */
@@ -2646,26 +2741,59 @@ public final class FiberAnalysisDialog {
     }
 
     /** The background threshold in native units — the 2nd-pass override if one is active, else the spinner. */
-    private double currentThreshold() {
-        Double ov = thresholdOverride;
+    private double currentThresholdNative() {
+        Double ov = thresholdOverrideNative;
         return ov != null ? ov : thresholdSpinner.getValue();
     }
 
-    /** Map a native-units threshold onto the global 0-255 mask scale. */
-    private int threshIm2For(double nativeThreshold) {
-        double range = normHi > normLo ? normHi - normLo : 1.0;
-        return clamp((int) Math.round((nativeThreshold - normLo) / range * 255.0), 0, 255);
+    /** Map a native-units threshold onto the global 0-255 scale (white point {@code normHiNative}). */
+    private int threshIm2For(double thresholdNative) {
+        return threshIm2For(thresholdNative, normHiNative);
+    }
+
+    /** Map a native-units threshold onto a 0-255 scale whose white point is {@code whitePointNative}. */
+    private int threshIm2For(double thresholdNative, double whitePointNative) {
+        double range = whitePointNative > normLoNative ? whitePointNative - normLoNative : 1.0;
+        return clamp((int) Math.round((thresholdNative - normLoNative) / range * 255.0), 0, 255);
     }
 
     /** Map the native-units threshold onto the global 0-255 scale used by FIRE (MASK display). */
     private int threshIm2() {
-        return threshIm2For(currentThreshold());
+        return threshIm2For(currentThresholdNative());
+    }
+
+    /**
+     * White point for the LIVE MASK's grayscale: {@code normHiNative}, raised to cover the region's
+     * bright collagen (the 99.9th percentile of the above-threshold sample, the same level the
+     * image sent to FIRE is scaled to cover). On a large or sparse region {@code normHiNative}, a 99.5th
+     * percentile of a mostly dark sample, sits at the collagen's own intensity: every bundle then
+     * showed as flat white, and a threshold above {@code normHiNative} mapped to 255 and drew an EMPTY
+     * mask although pixels above it existed. The ratio floor of {@link #serverNormHiNative} is left out
+     * so the mask keeps its contrast; the threshold still maps through the same value as the gray,
+     * so the violet region is exactly {native > threshold}.
+     */
+    private double displayNormHiNative() {
+        return Math.max(normHiNative, brightCollagenLevelNative());
+    }
+
+    /**
+     * Re-read the mask background once the threshold nears the white point it was scaled with:
+     * above that point the threshold maps to 255 and nothing can be drawn.
+     */
+    private void refreshBackgroundIfThresholdNearWhitePoint() {
+        if (lastBgGray == null) {
+            return;
+        }
+        double nearWhiteNative = normLoNative + 0.95 * (lastBgWhitePointNative - normLoNative);
+        if (currentThresholdNative() >= nearWhiteNative) {
+            refreshBackground();
+        }
     }
 
     // Ceiling for the FIRE 0-255 threshold in the image SENT to the server. If thresh_im2
     // approaches 255, the bright collagen has been prescaled into a flat, clipped plateau
     // (no intensity gradient), so FIRE's distance-map nucleation finds no ridges and traces
-    // ZERO fibers -- exactly the failure seen when the white point (normHi) is sampled from a
+    // ZERO fibers -- exactly the failure seen when the white point (normHiNative) is sampled from a
     // mostly-dark region (e.g. the whole image), where the 99.5th percentile sits right at the
     // fibre intensity. Keeping thresh_im2 <= this leaves headroom so fibres keep their gradient.
     private static final double MAX_SERVER_IM2 = 155.0;
@@ -2675,10 +2803,10 @@ public final class FiberAnalysisDialog {
      * map above {@link #MAX_SERVER_IM2}: with a dark-dominated sample this raises the white point
      * above the collagen intensity so the bright fibres keep an intensity gradient instead of
      * clipping to a flat 255. Threshold-aware and self-consistent with {@link #serverThreshIm2}.
-     * The live mask deliberately keeps the plain {@code normHi} -- its red region (native &gt;
+     * The live mask deliberately keeps the plain {@code normHiNative} -- its red region (native &gt;
      * threshold) is unaffected by the white point, so threshold-setting stays correct.
      */
-    private double serverNormHi(double lo, double hi) {
+    private double serverNormHiNative(double lo, double hi) {
         // Headroom must cover the BRIGHTEST COLLAGEN, which is what the fixed ratio got wrong. The
         // old floor only ever allowed threshold x 255/155 (~1.6x the threshold), but real collagen
         // runs several times the threshold -- measured 4.5x on one field -- so the top of every
@@ -2686,10 +2814,10 @@ public final class FiberAnalysisDialog {
         // tracing. 9% of that tile, and 63% of one band, was flat white.
         //
         // So ask the data: take a high percentile of the pixels ABOVE the threshold (the collagen
-        // itself, not the dark background that dominates normHi) and keep that below 255. The
+        // itself, not the dark background that dominates normHiNative) and keep that below 255. The
         // fixed ratio stays as a floor for the case where the sample says nothing useful.
-        double ratioFloor = lo + (currentThreshold() - lo) * (255.0 / MAX_SERVER_IM2);
-        double collagenFloor = brightCollagenLevel();
+        double ratioFloor = lo + (currentThresholdNative() - lo) * (255.0 / MAX_SERVER_IM2);
+        double collagenFloor = brightCollagenLevelNative();
         return Math.max(hi, Math.max(ratioFloor, collagenFloor));
     }
 
@@ -2699,12 +2827,12 @@ public final class FiberAnalysisDialog {
      * fixed ratio. The percentile (not the max) keeps a few hot pixels from inflating the range and
      * washing everything else out.
      */
-    private double brightCollagenLevel() {
-        double[] sample = statSample;
+    private double brightCollagenLevelNative() {
+        double[] sample = statSampleNative;
         if (sample == null || sample.length < 64) {
             return 0.0;
         }
-        double thr = currentThreshold();
+        double thr = currentThresholdNative();
         double[] above = java.util.Arrays.stream(sample).filter(v -> v > thr).sorted().toArray();
         if (above.length < 32) {
             return 0.0; // almost nothing above the threshold — nothing to protect from clipping
@@ -2712,19 +2840,19 @@ public final class FiberAnalysisDialog {
         return percentile(above, 0.999);
     }
 
-    private double serverNormHi() {
-        return serverNormHi(normLo, normHi);
+    private double serverNormHiNative() {
+        return serverNormHiNative(normLoNative, normHiNative);
     }
 
     /** thresh_im2 for the SENT image, using the floored white point (so it never saturates). */
     private int serverThreshIm2(double lo, double hi) {
-        double eh = serverNormHi(lo, hi);
+        double eh = serverNormHiNative(lo, hi);
         double range = eh > lo ? eh - lo : 1.0;
-        return clamp((int) Math.round((currentThreshold() - lo) / range * 255.0), 0, 255);
+        return clamp((int) Math.round((currentThresholdNative() - lo) / range * 255.0), 0, 255);
     }
 
     private int serverThreshIm2() {
-        return serverThreshIm2(normLo, normHi);
+        return serverThreshIm2(normLoNative, normHiNative);
     }
 
     /** Pull the "overrides" object out of a built meta JSON, for logging what FIRE receives. */
@@ -2739,12 +2867,12 @@ public final class FiberAnalysisDialog {
 
     private String buildMeta(double downsample, boolean hasMask, JsonObject extra) {
         int threshIm2 = serverThreshIm2(); // floored so bright collagen doesn't clip to flat 255
-        int ll1 = Math.max(1, (int) Math.round(toAnalysedPx(minLenSpinner.getValue(), downsample)));
-        double distPx = toAnalysedPx(tacsZoneSpinner.getValue(), downsample);
+        int ll1AnalysedPx = Math.max(1, (int) Math.round(toAnalysedPx(minLenSpinner.getValue(), downsample)));
+        double tacsZoneAnalysedPx = toAnalysedPx(tacsZoneSpinner.getValue(), downsample);
 
         JsonObject overrides = new JsonObject();
         overrides.addProperty("thresh_im2", threshIm2);
-        overrides.addProperty("LL1", ll1);
+        overrides.addProperty("LL1", ll1AnalysedPx);
         overrides.addProperty("thresh_LMPdist", seedSpacingAnalysedPx(downsample));
         overrides.addProperty("sigma_im", smoothingSpinner.getValue());
         overrides.addProperty("sigma_d", distSmoothSpinner.getValue());
@@ -2761,12 +2889,12 @@ public final class FiberAnalysisDialog {
         // Advanced parity knobs (sent as raw FIRE 'value'-dict params).
         overrides.addProperty("thresh_Dxlink", dxlinkSpinner.getValue());
         overrides.addProperty("lam_dirdecay", dirDecaySpinner.getValue());
-        overrides.addProperty("s_fiberdir", fiberDirAnalysedPx(downsample));
-        overrides.addProperty("thresh_flen", fireFlenAnalysedPx(downsample));
-        overrides.addProperty("s_maxspace", maxSpaceAnalysedPx(downsample));
+        overrides.addProperty("s_fiberdir", fiberDirVertices());
+        overrides.addProperty("thresh_flen", fireFlenAnalysedPx());
+        overrides.addProperty("s_maxspace", maxSpaceAnalysedPx());
         overrides.addProperty("ang_interval", angIntervalSpinner.getValue());
         overrides.addProperty("lambda", lambdaSpinner.getValue());
-        overrides.addProperty("thresh_dang_L", dangLenAnalysedPx(downsample));
+        overrides.addProperty("thresh_dang_L", dangLenAnalysedPx());
         // Free-form extras win over the controls above.
         if (extra != null) {
             for (Map.Entry<String, com.google.gson.JsonElement> e : extra.entrySet()) {
@@ -2786,7 +2914,7 @@ public final class FiberAnalysisDialog {
         meta.addProperty("fiber_mode", fiberMode());
         meta.addProperty("use_ct_reconstruction", false);
         meta.addProperty("has_mask", hasMask);
-        meta.addProperty("distance_threshold", distPx);
+        meta.addProperty("distance_threshold", tacsZoneAnalysedPx);
         // Images are pre-scaled to 0-255 with a GLOBAL reference, so the server must
         // NOT re-normalise per tile (that is what amplified noise in black borders).
         meta.addProperty("prescaled", true);
@@ -2934,10 +3062,10 @@ public final class FiberAnalysisDialog {
         b.append(" region=").append(rx).append(',').append(ry).append(',').append(rw).append(',').append(rh);
         b.append(" px_um=").append(pixelSizeMicrons > 0 ? trimNum(pixelSizeMicrons) : "none");
         b.append(" unit=").append(unitLabel());
-        b.append(" thr_native=").append(trimNum(currentThreshold()));
-        b.append(" normLo=").append(trimNum(normLo));
-        b.append(" normHi=").append(trimNum(normHi));
-        b.append(" serverNormHi=").append(trimNum(serverNormHi()));
+        b.append(" thr_native=").append(trimNum(currentThresholdNative()));
+        b.append(" normLo=").append(trimNum(normLoNative));
+        b.append(" normHi=").append(trimNum(normHiNative));
+        b.append(" serverNormHi=").append(trimNum(serverNormHiNative()));
         b.append(" thresh_im2=").append(serverThreshIm2());
         if (twoPassCheck != null && twoPassCheck.isSelected() && secondThresholdSpinner != null) {
             b.append(" thr2_native=").append(trimNum(secondThresholdSpinner.getValue()));
@@ -3042,6 +3170,7 @@ public final class FiberAnalysisDialog {
             statusAsync(s);
             previewLog.line(s);
         };
+        final double bgWhitePointNative = displayNormHiNative();
         new Thread(() -> {
             try {
                 if (!guardHeavyRun(channel, downsample,
@@ -3064,7 +3193,8 @@ public final class FiberAnalysisDialog {
                 double bgDown = downsample * bgFactor;
                 BufferedImage bgRegion = server.readRegion(
                         RegionRequest.createInstance(server.getPath(), bgDown, rx, ry, rw, rh));
-                BufferedImage bgGray = ChannelExtractor.toGray(bgRegion, channel, normLo, normHi);
+                BufferedImage bgGray = ChannelExtractor.toGray(
+                        bgRegion, channel, normLoNative, bgWhitePointNative);
                 final var fxImg = ChannelExtractor.toFxImage(bgGray);
                 final int gw = bgGray.getWidth();
                 final int gh = bgGray.getHeight();
@@ -3076,6 +3206,7 @@ public final class FiberAnalysisDialog {
                 final String diag = diagnostics(res);
                 Platform.runLater(() -> {
                     lastBgGray = bgGray;
+                    lastBgWhitePointNative = bgWhitePointNative;
                     lastBgFx = fxImg;
                     lastBgW = gw;
                     lastBgH = gh;
@@ -3179,10 +3310,10 @@ public final class FiberAnalysisDialog {
         int afterWid = Math.max(0, afterLen - res.nWidthDropped);
         sb.append(String.format(" Funnel: %d traced → %d after Min length → %d after Max width.",
                 traced, afterLen, afterWid));
-        // res.minLengthPx is in ANALYSED px; show Min length in the user's units.
+        // res.minLengthAnalysedPx is in ANALYSED px; show Min length in the user's units.
         String minLenMsg = calibrated
-                ? String.format("%.0f µm", res.minLengthPx * lastDownsample * pixelSizeMicrons)
-                : String.format("%.0f px", res.minLengthPx * lastDownsample);
+                ? String.format("%.0f µm", res.minLengthAnalysedPx * lastDownsample * pixelSizeMicrons)
+                : String.format("%.0f px", res.minLengthAnalysedPx * lastDownsample);
         // Name the dominant loss stage and give ONE targeted fix.
         if (res.nLengthDropped >= Math.max(1, traced) * 0.3
                 && res.nLengthDropped >= res.nWidthDropped) {
@@ -3657,8 +3788,8 @@ public final class FiberAnalysisDialog {
                 prog.done(s1, String.format("scale %.0f–%.0f", norm[0], norm[1]));
                 // Freeze the dialog to the global scale so threshIm2 and the pieces agree.
                 Platform.runLater(() -> {
-                    normLo = norm[0];
-                    normHi = norm[1];
+                    normLoNative = norm[0];
+                    normHiNative = norm[1];
                     applyStatsToThresholdSpinner(false);
                     redrawMask();
                 });
@@ -3783,7 +3914,7 @@ public final class FiberAnalysisDialog {
         batchCancel.set(false);
         final int channel = chosenChannel();
         final double downsample = downsampleSpinner.getValue();
-        final double minLenUnit = minLenSpinner.getValue();
+        final double minLenUserUnit = minLenSpinner.getValue();
         final JsonObject extra;
         try {
             extra = parseExtra();
@@ -3801,7 +3932,7 @@ public final class FiberAnalysisDialog {
         // Snapshot the dialog's context so we can restore it after the (context-swapping) run.
         final ImageServer<BufferedImage> oServer = server;
         final int oRx = rx, oRy = ry, oRw = rw, oRh = rh;
-        final double oNormLo = normLo, oNormHi = normHi, oPix = pixelSizeMicrons;
+        final double oNormLoNative = normLoNative, oNormHiNative = normHiNative, oPix = pixelSizeMicrons;
         final boolean oCal = calibrated;
         final Project<BufferedImage> logProject = qupath.getProject();
         final java.nio.file.Path logDir =
@@ -3916,14 +4047,14 @@ public final class FiberAnalysisDialog {
                 }
                 final java.util.concurrent.atomic.AtomicInteger tilesDone =
                         new java.util.concurrent.atomic.AtomicInteger(0);
-                final long tilesStart = System.currentTimeMillis();
+                final long tilesStartMs = System.currentTimeMillis();
                 prog.detail(overall, "0 / " + totalTiles + " tiles");
                 batchTileTick = () -> {
                     int done = tilesDone.incrementAndGet();
-                    long el = System.currentTimeMillis() - tilesStart;
-                    long remain = Math.max(0, totalTiles - done);
+                    long elapsedMs = System.currentTimeMillis() - tilesStartMs;
+                    long tilesRemaining = Math.max(0, totalTiles - done);
                     String eta = done > 0
-                            ? " — ~" + humanTime((long) ((double) el / done * remain)) + " left" : "";
+                            ? " — ~" + humanTime((long) ((double) elapsedMs / done * tilesRemaining)) + " left" : "";
                     prog.detail(overall, done + " / " + Math.max(totalTiles, done) + " tiles" + eta);
                     if (batchCancel.get()) {
                         throw new BatchCancelled(); // unwind the image in progress, not just the loop
@@ -3946,6 +4077,19 @@ public final class FiberAnalysisDialog {
                         id = live ? qupath.getImageData() : entry.readImageData();
                         srv = id.getServer();
                         double[] cal = calibrationOf(srv);
+                        if ((cal[0] != 0) != oCal) {
+                            // The dialog's distances are in ITS image's unit. Sent to an image with
+                            // the other calibration they would be read in the wrong unit (a 16 um
+                            // seed spacing as 16 px), and with no pixel size on one side there is
+                            // nothing to convert by.
+                            String why = oCal
+                                    ? "no pixel size, and the settings are in µm"
+                                    : "a pixel size, and the settings are in px";
+                            runLog.line(nm + ": skipped — this image has " + why
+                                    + ". Run it from a dialog opened on an image like it.");
+                            prog.done(si, "skipped — " + why);
+                            continue;
+                        }
                         List<ROI> regs = regions.apply(id);
                         if (regs.isEmpty()) {
                             prog.done(si, "no regions — skipped");
@@ -3959,8 +4103,8 @@ public final class FiberAnalysisDialog {
                             prog.detail(si, "region " + regionNum + " / " + regs.size());
                             // --- context swap (restored in the outer finally) ---
                             server = srv;
-                            normLo = norm[0];
-                            normHi = norm[1];
+                            normLoNative = norm[0];
+                            normHiNative = norm[1];
                             calibrated = cal[0] != 0;
                             pixelSizeMicrons = cal[1];
                             setBatchRegion(region, srv);
@@ -3982,7 +4126,7 @@ public final class FiberAnalysisDialog {
                                     PathClass.fromString("Fiber", ColorTools.packRGB(0, 220, 0));
                             objects.addAll(FiberObjectBuilder.build(res.fibers, rx, ry, downsample,
                                     pixelSizeMicrons, plane, asDetections, fiberClass,
-                                    runRestrictRoi, minLenUnit));
+                                    runRestrictRoi, minLenUserUnit));
                         }
                         if (!objects.isEmpty()) {
                             id.getHierarchy().addObjects(objects);
@@ -4048,8 +4192,8 @@ public final class FiberAnalysisDialog {
                 ry = oRy;
                 rw = oRw;
                 rh = oRh;
-                normLo = oNormLo;
-                normHi = oNormHi;
+                normLoNative = oNormLoNative;
+                normHiNative = oNormHiNative;
                 pixelSizeMicrons = oPix;
                 calibrated = oCal;
                 final boolean wasStopped = batchCancel.get();
@@ -4274,7 +4418,7 @@ public final class FiberAnalysisDialog {
 
     /** Read one piece's masked gray (out-of-ROI zeroed) + its ground-truth lines. */
     private Piece buildPiece(ROI roi, int channel) throws Exception {
-        return buildPieceFrom(server, hierarchy, roi, channel, normLo, normHi);
+        return buildPieceFrom(server, hierarchy, roi, channel, normLoNative, normHiNative);
     }
 
     /**
@@ -4284,7 +4428,7 @@ public final class FiberAnalysisDialog {
      * consistent intensity scale (no per-image/per-annotation normalization).
      */
     private Piece buildPieceFrom(ImageServer<BufferedImage> srv, PathObjectHierarchy h, ROI roi,
-            int channel, double gNormLo, double gNormHi) throws Exception {
+            int channel, double gNormLoNative, double gNormHiNative) throws Exception {
         int px = (int) Math.floor(roi.getBoundsX());
         int py = (int) Math.floor(roi.getBoundsY());
         int pw = (int) Math.ceil(roi.getBoundsWidth());
@@ -4298,7 +4442,7 @@ public final class FiberAnalysisDialog {
         if (region == null) {
             return null;
         }
-        BufferedImage gray = ChannelExtractor.toGray(region, channel, gNormLo, serverNormHi(gNormLo, gNormHi));
+        BufferedImage gray = ChannelExtractor.toGray(region, channel, gNormLoNative, serverNormHiNative(gNormLoNative, gNormHiNative));
         BufferedImage mask = MaskRasterizer.rasterise(roi, px, py, sd, gray.getWidth(), gray.getHeight());
         int inRoi = applyMask(gray, mask);
         if (inRoi <= 0) {
@@ -4340,31 +4484,31 @@ public final class FiberAnalysisDialog {
         // Round 0 spans a BROAD range (dense → sparse seeding) so the search can reach high
         // fibre counts, not just hover near the current settings. The current values are
         // included so the result is never worse than what the user already has.
-        int sc = seedSpacingAnalysedPx(downsampleSpinner.getValue());
+        int seed0AnalysedPx = seedSpacingAnalysedPx(downsampleSpinner.getValue());
         // --- COUNT-driving axes (stage A) ---
-        int[] seeds = uniqInts(2, 4, 8, 16, Math.max(2, sc));
+        int[] seedsAnalysedPx = uniqInts(2, 4, 8, 16, Math.max(2, seed0AnalysedPx));
         // Sensitivity sweep MUST include values more sensitive (lower) than the current one —
         // otherwise the search can never find MORE fibers than the user already has (the old
         // 0.05/0.15/0.30 range only ever got less sensitive, so it plateaued at the start count).
         double[] lmps = uniqDoubles(0.02, 0.05, 0.12, clampD(seedSensSpinner.getValue(), 0.02, 0.9));
         // Link distance (thresh_linkd): how far apart traced segments join into one countable
         // fiber — a primary count lever (trade merging vs fragmentation).
-        double ld0 = Math.max(2.0, linkDistAnalysedPx(downsampleSpinner.getValue()));
-        double[] linkds = uniqDoubles(Math.max(2.0, ld0 * 0.5), ld0, ld0 * 1.6);
+        double linkDist0AnalysedPx = Math.max(2.0, linkDistAnalysedPx(downsampleSpinner.getValue()));
+        double[] linkDistsAnalysedPx = uniqDoubles(Math.max(2.0, linkDist0AnalysedPx * 0.5), linkDist0AnalysedPx, linkDist0AnalysedPx * 1.6);
         // Nucleation threshold (thresh_Dxlink): lower => more nucleation points => more fibers.
         double nu0 = clampD(dxlinkSpinner.getValue(), 0.0, 10.0);
         double[] nucls = uniqDoubles(Math.max(0.05, nu0 * 0.5), nu0);
         // --- GEOMETRY axes (stage B) ---
-        double[] bends = uniqDoubles(45, 65, 85, clampD(bendAngleSpinner.getValue(), 5, 89));
-        double[] links = uniqDoubles(15, 35, 60, clampD(linkAngleSpinner.getValue(), 0, 89));
+        double[] bendsDeg = uniqDoubles(45, 65, 85, clampD(bendAngleSpinner.getValue(), 5, 89));
+        double[] linkAnglesDeg = uniqDoubles(15, 35, 60, clampD(linkAngleSpinner.getValue(), 0, 89));
         // Cross-link search box (s_xlinkbox): the radius FIRE searches for nucleation/cross-links.
-        double xb0 = Math.max(1.0, xlinkBoxAnalysedPx(downsampleSpinner.getValue()));
-        double[] xboxes = uniqDoubles(Math.max(1.0, xb0 * 0.6), xb0, xb0 * 1.6);
+        double xlinkBox0AnalysedPx = Math.max(1.0, xlinkBoxAnalysedPx(downsampleSpinner.getValue()));
+        double[] xlinkBoxesAnalysedPx = uniqDoubles(Math.max(1.0, xlinkBox0AnalysedPx * 0.6), xlinkBox0AnalysedPx, xlinkBox0AnalysedPx * 1.6);
         // Cross-stage holds (round 0 = current spinner values). Stage A holds geometry fixed at
         // these; stage B holds the count axes at stage A's winner.
-        double bendFix = clampD(bendAngleSpinner.getValue(), 5, 89);
-        double linkFix = clampD(linkAngleSpinner.getValue(), 0, 89);
-        double xboxFix = xb0;
+        double bendFixDeg = clampD(bendAngleSpinner.getValue(), 5, 89);
+        double linkFixDeg = clampD(linkAngleSpinner.getValue(), 0, 89);
+        double xlinkBoxFixAnalysedPx = xlinkBox0AnalysedPx;
 
         logger.info("SUGGEST start (two-stage): pieces={} supervised={} | FIXED thr_im2={} "
                 + "sigma_im={} downsample={} minLen={}{} | countTol={}% maxRounds={}",
@@ -4380,19 +4524,19 @@ public final class FiberAnalysisDialog {
         AggResult prevBest = null;
         int totalRuns = 0;
         for (int round = 0; round < maxRounds; round++) {
-            // ---- Stage A: count-driving axes; geometry held at bend/link/xboxFix ----
-            int comboA = seeds.length * lmps.length * linkds.length * nucls.length;
+            // ---- Stage A: count-driving axes; geometry held at bend/link/xlinkBoxFixAnalysedPx ----
+            int comboA = seedsAnalysedPx.length * lmps.length * linkDistsAnalysedPx.length * nucls.length;
             totalRuns += comboA * pieces.size();
             statusAsync(String.format("Tuning round %d/%d — stage A (count): %d combos…",
                     round + 1, maxRounds, comboA));
             logger.info("SUGGEST round {}/{} stage A: {} combos/piece | seeds={} sens={} linkd={} "
                     + "nucl={} | hold bend={} link={} xbox={}", round + 1, maxRounds, comboA,
-                    java.util.Arrays.toString(seeds), java.util.Arrays.toString(lmps),
-                    java.util.Arrays.toString(linkds), java.util.Arrays.toString(nucls),
-                    Math.round(bendFix), Math.round(linkFix), Math.round(xboxFix));
-            List<AggResult> aggA = aggregatedSearch(pieces, seeds, lmps,
-                    new double[] {bendFix}, new double[] {linkFix}, linkds, nucls,
-                    new double[] {xboxFix}, supervised, countTol);
+                    java.util.Arrays.toString(seedsAnalysedPx), java.util.Arrays.toString(lmps),
+                    java.util.Arrays.toString(linkDistsAnalysedPx), java.util.Arrays.toString(nucls),
+                    Math.round(bendFixDeg), Math.round(linkFixDeg), Math.round(xlinkBoxFixAnalysedPx));
+            List<AggResult> aggA = aggregatedSearch(pieces, seedsAnalysedPx, lmps,
+                    new double[] {bendFixDeg}, new double[] {linkFixDeg}, linkDistsAnalysedPx, nucls,
+                    new double[] {xlinkBoxFixAnalysedPx}, supervised, countTol);
             if (aggA.isEmpty()) {
                 logger.warn("SUGGEST round {}: stage A returned no results", round + 1);
                 break;
@@ -4404,24 +4548,24 @@ public final class FiberAnalysisDialog {
                 }
             }
             AggResult bestA = aggA.get(0);
-            int bestSeed = (int) Math.round(bestA.overrides.getOrDefault("thresh_LMPdist", (double) sc));
+            int bestSeedAnalysedPx = (int) Math.round(bestA.overrides.getOrDefault("thresh_LMPdist", (double) seed0AnalysedPx));
             double bestLmp = bestA.overrides.getOrDefault("thresh_LMP", 0.05);
-            double bestLinkd = bestA.overrides.getOrDefault("thresh_linkd", ld0);
+            double bestLinkDistAnalysedPx = bestA.overrides.getOrDefault("thresh_linkd", linkDist0AnalysedPx);
             double bestNucl = bestA.overrides.getOrDefault("thresh_Dxlink", nu0);
 
             // ---- Stage B: geometry axes; count axes fixed at stage A's winner ----
-            int comboB = bends.length * links.length * xboxes.length;
+            int comboB = bendsDeg.length * linkAnglesDeg.length * xlinkBoxesAnalysedPx.length;
             totalRuns += comboB * pieces.size();
             statusAsync(String.format("Tuning round %d/%d — stage B (geometry): %d combos…",
                     round + 1, maxRounds, comboB));
             logger.info("SUGGEST round {}/{} stage B: {} combos/piece | bend={} link={} xbox={} | "
                     + "hold seed={} sens={} linkd={} nucl={}", round + 1, maxRounds, comboB,
-                    java.util.Arrays.toString(bends), java.util.Arrays.toString(links),
-                    java.util.Arrays.toString(xboxes), bestSeed, String.format("%.2f", bestLmp),
-                    Math.round(bestLinkd), String.format("%.2f", bestNucl));
-            List<AggResult> aggB = aggregatedSearch(pieces, new int[] {bestSeed},
-                    new double[] {bestLmp}, bends, links, new double[] {bestLinkd},
-                    new double[] {bestNucl}, xboxes, supervised, countTol);
+                    java.util.Arrays.toString(bendsDeg), java.util.Arrays.toString(linkAnglesDeg),
+                    java.util.Arrays.toString(xlinkBoxesAnalysedPx), bestSeedAnalysedPx, String.format("%.2f", bestLmp),
+                    Math.round(bestLinkDistAnalysedPx), String.format("%.2f", bestNucl));
+            List<AggResult> aggB = aggregatedSearch(pieces, new int[] {bestSeedAnalysedPx},
+                    new double[] {bestLmp}, bendsDeg, linkAnglesDeg, new double[] {bestLinkDistAnalysedPx},
+                    new double[] {bestNucl}, xlinkBoxesAnalysedPx, supervised, countTol);
             for (AggResult ar : aggB) {
                 AggResult cur = globalBest.get(comboKey(ar.overrides));
                 if (cur == null || ar.score > cur.score) {
@@ -4439,13 +4583,13 @@ public final class FiberAnalysisDialog {
                     describeParams(best.overrides));
 
             // Combined best across BOTH stages drives the next round's re-centring.
-            bestSeed = (int) Math.round(best.overrides.getOrDefault("thresh_LMPdist", (double) bestSeed));
+            bestSeedAnalysedPx = (int) Math.round(best.overrides.getOrDefault("thresh_LMPdist", (double) bestSeedAnalysedPx));
             bestLmp = best.overrides.getOrDefault("thresh_LMP", bestLmp);
-            bestLinkd = best.overrides.getOrDefault("thresh_linkd", bestLinkd);
+            bestLinkDistAnalysedPx = best.overrides.getOrDefault("thresh_linkd", bestLinkDistAnalysedPx);
             bestNucl = best.overrides.getOrDefault("thresh_Dxlink", bestNucl);
-            double bestBend = cosToExt(best.overrides.getOrDefault("thresh_ext", extToCos(bendFix)));
-            double bestLink = cosToLinka(best.overrides.getOrDefault("thresh_linka", linkaToCos(linkFix)));
-            double bestXbox = best.overrides.getOrDefault("s_xlinkbox", xboxFix);
+            double bestBendDeg = cosToExt(best.overrides.getOrDefault("thresh_ext", extToCos(bendFixDeg)));
+            double bestLinkAngleDeg = cosToLinka(best.overrides.getOrDefault("thresh_linka", linkaToCos(linkFixDeg)));
+            double bestXlinkBoxAnalysedPx = best.overrides.getOrDefault("s_xlinkbox", xlinkBoxFixAnalysedPx);
 
             if (prevBest != null && best.score <= prevBest.score + 1e-4) {
                 logger.info("SUGGEST converged at round {} (no score improvement)", round + 1);
@@ -4455,22 +4599,22 @@ public final class FiberAnalysisDialog {
 
             // Re-centre finer 3-level ranges on the combined best, shrinking each round.
             double f = 1.0 / (round + 1);
-            int sStep = Math.max(1, (int) Math.round(bestSeed * 0.4 * f));
-            seeds = uniqInts(Math.max(2, bestSeed - sStep), bestSeed, bestSeed + sStep);
+            int seedStepAnalysedPx = Math.max(1, (int) Math.round(bestSeedAnalysedPx * 0.4 * f));
+            seedsAnalysedPx = uniqInts(Math.max(2, bestSeedAnalysedPx - seedStepAnalysedPx), bestSeedAnalysedPx, bestSeedAnalysedPx + seedStepAnalysedPx);
             lmps = uniqDoubles(clampD(bestLmp - 0.1 * f, 0.02, 0.9), bestLmp,
                     clampD(bestLmp + 0.1 * f, 0.02, 0.9));
-            linkds = uniqDoubles(clampD(bestLinkd - Math.max(2.0, bestLinkd * 0.4 * f), 2, 200),
-                    bestLinkd, clampD(bestLinkd + Math.max(2.0, bestLinkd * 0.4 * f), 2, 200));
+            linkDistsAnalysedPx = uniqDoubles(clampD(bestLinkDistAnalysedPx - Math.max(2.0, bestLinkDistAnalysedPx * 0.4 * f), 2, 200),
+                    bestLinkDistAnalysedPx, clampD(bestLinkDistAnalysedPx + Math.max(2.0, bestLinkDistAnalysedPx * 0.4 * f), 2, 200));
             nucls = uniqDoubles(clampD(bestNucl - Math.max(0.1, bestNucl * 0.5 * f), 0.05, 10),
                     bestNucl, clampD(bestNucl + Math.max(0.1, bestNucl * 0.5 * f), 0.05, 10));
-            double bStep = Math.max(4, 18.0 * f);
-            bends = uniqDoubles(clampD(bestBend - bStep, 5, 89), bestBend, clampD(bestBend + bStep, 5, 89));
-            links = uniqDoubles(clampD(bestLink - bStep, 0, 89), bestLink, clampD(bestLink + bStep, 0, 89));
-            xboxes = uniqDoubles(clampD(bestXbox - Math.max(1.0, bestXbox * 0.4 * f), 1, 50),
-                    bestXbox, clampD(bestXbox + Math.max(1.0, bestXbox * 0.4 * f), 1, 50));
-            bendFix = bestBend;
-            linkFix = bestLink;
-            xboxFix = bestXbox;
+            double bendStepDeg = Math.max(4, 18.0 * f);
+            bendsDeg = uniqDoubles(clampD(bestBendDeg - bendStepDeg, 5, 89), bestBendDeg, clampD(bestBendDeg + bendStepDeg, 5, 89));
+            linkAnglesDeg = uniqDoubles(clampD(bestLinkAngleDeg - bendStepDeg, 0, 89), bestLinkAngleDeg, clampD(bestLinkAngleDeg + bendStepDeg, 0, 89));
+            xlinkBoxesAnalysedPx = uniqDoubles(clampD(bestXlinkBoxAnalysedPx - Math.max(1.0, bestXlinkBoxAnalysedPx * 0.4 * f), 1, 50),
+                    bestXlinkBoxAnalysedPx, clampD(bestXlinkBoxAnalysedPx + Math.max(1.0, bestXlinkBoxAnalysedPx * 0.4 * f), 1, 50));
+            bendFixDeg = bestBendDeg;
+            linkFixDeg = bestLinkAngleDeg;
+            xlinkBoxFixAnalysedPx = bestXlinkBoxAnalysedPx;
         }
 
         List<AggResult> out = new ArrayList<>(globalBest.values());
@@ -4506,8 +4650,8 @@ public final class FiberAnalysisDialog {
     }
 
     /** Run one grid across every piece and pool the per-combo results into the union. */
-    private List<AggResult> aggregatedSearch(List<Piece> pieces, int[] seeds, double[] lmps,
-            double[] bends, double[] links, double[] linkds, double[] nucls, double[] xboxes,
+    private List<AggResult> aggregatedSearch(List<Piece> pieces, int[] seedsAnalysedPx, double[] lmps,
+            double[] bendsDeg, double[] linkAnglesDeg, double[] linkDistsAnalysedPx, double[] nucls, double[] xlinkBoxesAnalysedPx,
             boolean supervised, double countTol) throws Exception {
         boolean areaWeight = pieceWeightBox.getSelectionModel().getSelectedIndex() == 1;
         FiberSocketClient client = new FiberSocketClient(
@@ -4526,8 +4670,8 @@ public final class FiberAnalysisDialog {
         for (int pi = 0; pi < pieces.size(); pi++) {
             Piece p = pieces.get(pi);
             final int gtOffset = gtOffsets[pi];
-            String meta = buildGridMeta(p.searchDown, p.gt, seeds, lmps, bends, links, linkds,
-                    nucls, xboxes, supervised, countTol);
+            String meta = buildGridMeta(p.searchDown, p.gt, seedsAnalysedPx, lmps, bendsDeg, linkAnglesDeg, linkDistsAnalysedPx,
+                    nucls, xlinkBoxesAnalysedPx, supervised, countTol);
             FiberSocketClient.GridSearchResponse resp = client.gridSearch(p.maskedGray, meta);
             if (resp == null || !resp.ok || resp.results == null) {
                 logger.warn("SUGGEST piece @({},{}): grid search returned no results (resp={})",
@@ -4790,12 +4934,12 @@ public final class FiberAnalysisDialog {
      * count-primary scoring config (when supervised).
      */
     private String buildGridMeta(double searchDown, JsonArray gtLines,
-            int[] seeds, double[] lmps, double[] bends, double[] links, double[] linkds,
-            double[] nucls, double[] xboxes, boolean supervised, double countTol) {
-        int ll1 = Math.max(1, (int) Math.round(toAnalysedPx(minLenSpinner.getValue(), searchDown)));
+            int[] seedsAnalysedPx, double[] lmps, double[] bendsDeg, double[] linkAnglesDeg, double[] linkDistsAnalysedPx,
+            double[] nucls, double[] xlinkBoxesAnalysedPx, boolean supervised, double countTol) {
+        int ll1AnalysedPx = Math.max(1, (int) Math.round(toAnalysedPx(minLenSpinner.getValue(), searchDown)));
 
         JsonObject base = new JsonObject(); // fixed knobs (incl. the user-set, previewable ones)
-        base.addProperty("LL1", ll1);
+        base.addProperty("LL1", ll1AnalysedPx);
         base.addProperty("thresh_im2", serverThreshIm2());     // FIXED — floored so bright collagen keeps gradient
         base.addProperty("sigma_im", smoothingSpinner.getValue()); // FIXED — set by eye via the mask
         // s_xlinkbox (Cross-link box) and thresh_Dxlink (Nucleation) are now SEARCHED (see grid).
@@ -4804,27 +4948,27 @@ public final class FiberAnalysisDialog {
         // thresh_linkd (Link distance) is now a SEARCHED axis (see grid below), not fixed.
         base.addProperty("widMAX", maxWidthAnalysedPx(searchDown));
         base.addProperty("lam_dirdecay", dirDecaySpinner.getValue());
-        base.addProperty("s_fiberdir", fiberDirAnalysedPx(searchDown));
-        base.addProperty("thresh_flen", fireFlenAnalysedPx(searchDown));
-        base.addProperty("s_maxspace", maxSpaceAnalysedPx(searchDown));
+        base.addProperty("s_fiberdir", fiberDirVertices());
+        base.addProperty("thresh_flen", fireFlenAnalysedPx());
+        base.addProperty("s_maxspace", maxSpaceAnalysedPx());
         base.addProperty("ang_interval", angIntervalSpinner.getValue());
         base.addProperty("lambda", lambdaSpinner.getValue());
-        base.addProperty("thresh_dang_L", dangLenAnalysedPx(searchDown));
+        base.addProperty("thresh_dang_L", dangLenAnalysedPx());
 
-        JsonArray seedA = intArr(seeds);
+        JsonArray seedA = intArr(seedsAnalysedPx);
         JsonArray lmpA = doubleArr(lmps);
         JsonArray extA = new JsonArray();
-        for (double d : bends) {
+        for (double d : bendsDeg) {
             extA.add(extToCos(d));   // bend angle (deg) -> thresh_ext cosine
         }
         JsonArray linkA = new JsonArray();
-        for (double d : links) {
+        for (double d : linkAnglesDeg) {
             linkA.add(linkaToCos(d)); // link angle (deg) -> thresh_linka
         }
-        JsonArray linkdA = doubleArr(linkds);
+        JsonArray linkdA = doubleArr(linkDistsAnalysedPx);
         // s_xlinkbox must be integer analysed px (C++ int arg); round each swept value.
         JsonArray xboxA = new JsonArray();
-        for (double d : xboxes) {
+        for (double d : xlinkBoxesAnalysedPx) {
             xboxA.add((int) Math.max(1, Math.round(d)));
         }
         JsonArray nuclA = doubleArr(nucls);
@@ -4842,7 +4986,7 @@ public final class FiberAnalysisDialog {
         meta.add("base_overrides", base);
         meta.add("grid", grid);
         meta.add("gt_lines", gtLines);
-        meta.addProperty("match_dist", Math.max(8.0, ll1 * 0.6));
+        meta.addProperty("match_dist", Math.max(8.0, ll1AnalysedPx * 0.6));
         meta.addProperty("match_angle", 20.0);
         // Cover the whole grid so no combo is silently dropped by the server's cap.
         meta.addProperty("max_combos", seedA.size() * lmpA.size() * extA.size() * linkA.size()
@@ -5154,8 +5298,8 @@ public final class FiberAnalysisDialog {
         if (o.containsKey("thresh_LMPdist")) {
             // The grid searches seed spacing in analysed px; convert back to the spinner's
             // real-world unit using the current downsample as the reference.
-            double um = fromAnalysedPx(o.get("thresh_LMPdist"), downsampleSpinner.getValue());
-            setSpinnerValue(seedSpacingSpinner, round1(clampD(um, 1.0, 200.0)));
+            double seedSpacingUserUnit = fromAnalysedPx(o.get("thresh_LMPdist"), downsampleSpinner.getValue());
+            setSpinnerValue(seedSpacingSpinner, round1(clampD(seedSpacingUserUnit, 1.0, 200.0)));
         }
         if (o.containsKey("thresh_LMP")) {
             setSpinnerValue(seedSensSpinner, clampD(o.get("thresh_LMP"), 0.0, 1.0));
@@ -5167,15 +5311,15 @@ public final class FiberAnalysisDialog {
             setSpinnerValue(linkAngleSpinner, clampD(cosToLinka(o.get("thresh_linka")), 0.0, 89.0));
         }
         if (o.containsKey("thresh_linkd")) {
-            double ld = fromAnalysedPx(o.get("thresh_linkd"), downsampleSpinner.getValue());
-            setSpinnerValue(linkDistSpinner, round1(clampD(ld, 0.0, 120.0)));
+            double linkDistUserUnit = fromAnalysedPx(o.get("thresh_linkd"), downsampleSpinner.getValue());
+            setSpinnerValue(linkDistSpinner, round1(clampD(linkDistUserUnit, 0.0, 120.0)));
         }
         if (o.containsKey("thresh_Dxlink")) {
             setSpinnerValue(dxlinkSpinner, round1(clampD(o.get("thresh_Dxlink"), 0.0, 10.0)));
         }
         if (o.containsKey("s_xlinkbox")) {
-            double xb = fromAnalysedPx(o.get("s_xlinkbox"), downsampleSpinner.getValue());
-            setSpinnerValue(xlinkBoxSpinner, round1(clampD(xb, 0.5, 50.0)));
+            double xlinkBoxUserUnit = fromAnalysedPx(o.get("s_xlinkbox"), downsampleSpinner.getValue());
+            setSpinnerValue(xlinkBoxSpinner, round1(clampD(xlinkBoxUserUnit, 0.5, 50.0)));
         }
         updateThresholdFeedback();
         redrawPreview();
@@ -5200,7 +5344,7 @@ public final class FiberAnalysisDialog {
         if (region == null) {
             throw new RuntimeException("server.readRegion returned null for a tile");
         }
-        BufferedImage gray = ChannelExtractor.toGray(region, channel, normLo, serverNormHi());
+        BufferedImage gray = ChannelExtractor.toGray(region, channel, normLoNative, serverNormHiNative());
         // Restrict-to-object: zero pixels outside the run's ROI so FIRE never nucleates outside it.
         if (runRestrictRoi != null) {
             BufferedImage roiMask = MaskRasterizer.rasterise(
@@ -5264,14 +5408,14 @@ public final class FiberAnalysisDialog {
         double t2 = secondThresholdSpinner.getValue();
         status.accept(String.format("Two-pass 1/2 — main threshold %s…", trimNum(t1)));
         AnalyzeResult a = analyzeFull(channel, d, false, null, extra, status, tileSink);
-        thresholdOverride = t2;
+        thresholdOverrideNative = t2;
         AnalyzeResult b;
         try {
             status.accept(String.format("Two-pass 2/2 — %s threshold %s…",
                     t2 < t1 ? "lower (dim fibres)" : "higher (thick bundles)", trimNum(t2)));
             b = analyzeFull(channel, d, false, null, extra, status, tileSink);
         } finally {
-            thresholdOverride = null;
+            thresholdOverrideNative = null;
         }
         status.accept(String.format("Merging passes (%d + %d fibres)…",
                 a.fibers.size(), b.fibers.size()));
@@ -5284,7 +5428,7 @@ public final class FiberAnalysisDialog {
         r.nTraced = a.nTraced + b.nTraced;
         r.nLengthDropped = a.nLengthDropped + b.nLengthDropped;
         r.nWidthDropped = a.nWidthDropped + b.nWidthDropped;
-        r.minLengthPx = a.minLengthPx;
+        r.minLengthAnalysedPx = a.minLengthAnalysedPx;
         return r;
     }
 
@@ -5331,7 +5475,7 @@ public final class FiberAnalysisDialog {
         int totalTraced = 0;
         int totalLenDropped = 0;
         int totalWidDropped = 0;
-        double minLenPx = 0;
+        double minLenAnalysedPx = 0;
         long tilesStartMs = System.currentTimeMillis();
         // PARALLEL TILES. Worker threads do only the expensive, independent part -- read the
         // region and hand it to the server. Everything else (ordering, counters, the live
@@ -5361,8 +5505,8 @@ public final class FiberAnalysisDialog {
         for (int t = 0; t < tiles.size(); t++) {
             String eta = "";
             if (t > 0) {
-                long per = (System.currentTimeMillis() - tilesStartMs) / t; // avg per finished tile
-                eta = " — ~" + humanTime(per * (tiles.size() - t)) + " left";
+                long perTileMs = (System.currentTimeMillis() - tilesStartMs) / t; // avg per finished tile
+                eta = " — ~" + humanTime(perTileMs * (tiles.size() - t)) + " left";
             }
             status.accept(tiles.size() > 1
                     ? String.format(
@@ -5405,7 +5549,7 @@ public final class FiberAnalysisDialog {
                 totalWidDropped += resp.nWidthDropped;
             }
             if (resp.minLengthPx != null) {
-                minLenPx = resp.minLengthPx;
+                minLenAnalysedPx = resp.minLengthPx;
             }
             List<FiberSocketClient.Fiber> tileFibers =
                     resp.fibers != null ? resp.fibers : new ArrayList<>();
@@ -5482,7 +5626,7 @@ public final class FiberAnalysisDialog {
         ar.nTraced = totalTraced;
         ar.nLengthDropped = totalLenDropped;
         ar.nWidthDropped = totalWidDropped;
-        ar.minLengthPx = minLenPx;
+        ar.minLengthAnalysedPx = minLenAnalysedPx;
         return ar;
     }
 
@@ -5526,7 +5670,7 @@ public final class FiberAnalysisDialog {
             FiberSocketClient client, List<FiberSocketClient.Fiber> fibers, double d, boolean tacs,
             boolean stitch, BufferedImage mask, java.util.function.Consumer<String> status,
             String base) throws Exception {
-        final long start = System.currentTimeMillis();
+        final long startMs = System.currentTimeMillis();
         final java.util.concurrent.atomic.AtomicBoolean running =
                 new java.util.concurrent.atomic.AtomicBoolean(true);
         Thread ticker = new Thread(() -> {
@@ -5536,7 +5680,7 @@ public final class FiberAnalysisDialog {
                     if (!running.get()) {
                         break;
                     }
-                    long secs = (System.currentTimeMillis() - start) / 1000;
+                    long secs = (System.currentTimeMillis() - startMs) / 1000;
                     status.accept(String.format(
                             "%s… %s elapsed (one big step — the window isn't frozen; the image "
                             + "refreshes when it finishes).", base, humanTime(secs * 1000)));
@@ -5652,7 +5796,7 @@ public final class FiberAnalysisDialog {
         ar.nTraced = resp.nTraced != null ? resp.nTraced : out.size();
         ar.nLengthDropped = resp.nLengthDropped != null ? resp.nLengthDropped : 0;
         ar.nWidthDropped = resp.nWidthDropped != null ? resp.nWidthDropped : 0;
-        ar.minLengthPx = resp.minLengthPx != null ? resp.minLengthPx : 0;
+        ar.minLengthAnalysedPx = resp.minLengthPx != null ? resp.minLengthPx : 0;
         return ar;
     }
 
@@ -5702,7 +5846,7 @@ public final class FiberAnalysisDialog {
                     BufferedImage treg = server.readRegion(RegionRequest.createInstance(
                             server.getPath(), d, tl.fullX, tl.fullY, tl.fullW, tl.fullH));
                     if (treg != null) {
-                        BufferedImage tg = ChannelExtractor.toGray(treg, channel, normLo, serverNormHi());
+                        BufferedImage tg = ChannelExtractor.toGray(treg, channel, normLoNative, serverNormHiNative());
                         javax.imageio.ImageIO.write(tg, "png",
                                 outDir.resolve("00_gray_client.png").toFile());
                         BufferedImage mk = buildTileMaskArgb(tg, smoothingSpinner.getValue(),
@@ -5780,7 +5924,7 @@ public final class FiberAnalysisDialog {
 
     private String fibersCsv(List<FiberSocketClient.Fiber> fibers, double d) {
         boolean cal = calibrated && pixelSizeMicrons > 0;
-        double toUnit = cal ? d * pixelSizeMicrons : d; // analysed px -> µm (or full-res px)
+        double analysedPxToUserUnit = cal ? d * pixelSizeMicrons : d; // analysed px -> µm (or full-res px)
         String u = cal ? "um" : "px";
         StringBuilder sb = new StringBuilder();
         sb.append("id,length_arc_").append(u).append(",length_end_").append(u)
@@ -5790,19 +5934,19 @@ public final class FiberAnalysisDialog {
           .append(",crimp_period_").append(u).append(",curvature_deg_per_").append(u).append('\n');
         for (FiberSocketClient.Fiber f : fibers) {
             sb.append(f.id).append(',')
-              .append(fmtNum(f.lengthArc * toUnit)).append(',')
-              .append(fmtNum(f.lengthEnd * toUnit)).append(',')
-              .append(fmtNum(f.width * toUnit)).append(',')
-              .append(fmtNum(f.widthMax * toUnit)).append(',')
-              .append(fmtNum(f.widthStd * toUnit)).append(',')
+              .append(fmtNum(f.lengthArc * analysedPxToUserUnit)).append(',')
+              .append(fmtNum(f.lengthEnd * analysedPxToUserUnit)).append(',')
+              .append(fmtNum(f.width * analysedPxToUserUnit)).append(',')
+              .append(fmtNum(f.widthMax * analysedPxToUserUnit)).append(',')
+              .append(fmtNum(f.widthStd * analysedPxToUserUnit)).append(',')
               .append(fmtNum(f.angle)).append(',')
               .append(fmtNum(f.straightness)).append(',')
               .append(f.points == null ? 0 : f.points.length).append(',')
               .append(fmtNum(f.kinkMaxDeg)).append(',')
               .append(fmtNum(f.kinkCount)).append(',')
-              .append(fmtNum(f.crimpAmp * toUnit)).append(',')
-              .append(fmtNum(f.crimpPeriod * toUnit)).append(',')
-              .append(fmtNum(toUnit > 0 ? f.curvature / toUnit : Double.NaN)).append('\n');
+              .append(fmtNum(f.crimpAmp * analysedPxToUserUnit)).append(',')
+              .append(fmtNum(f.crimpPeriod * analysedPxToUserUnit)).append(',')
+              .append(fmtNum(analysedPxToUserUnit > 0 ? f.curvature / analysedPxToUserUnit : Double.NaN)).append('\n');
         }
         return sb.toString();
     }
@@ -5917,7 +6061,7 @@ public final class FiberAnalysisDialog {
         int nTraced = 0;           // fibers FIRE traced before the Min-length filter
         int nLengthDropped = 0;    // removed by Min fiber length
         int nWidthDropped = 0;     // removed by Max fiber width
-        double minLengthPx = 0;    // the Min-length value applied (analysed px)
+        double minLengthAnalysedPx = 0;    // the Min-length value applied (analysed px)
 
         AnalyzeResult(List<FiberSocketClient.Fiber> fibers, String backend, int tiles) {
             this.fibers = fibers;
@@ -6057,6 +6201,7 @@ public final class FiberAnalysisDialog {
         final double downsample = downsampleSpinner.getValue();
         final boolean fits = regionFitsFaithfulPreview(downsample);
         final ROI maskRoi = interactiveRestrictRoi();
+        final double whitePointNative = displayNormHiNative();
         final int gen = ++bgGen;
         new Thread(() -> {
             try {
@@ -6074,7 +6219,7 @@ public final class FiberAnalysisDialog {
                 }
                 BufferedImage bgRegion = server.readRegion(
                         RegionRequest.createInstance(server.getPath(), bgDown, rx, ry, rw, rh));
-                BufferedImage bgGray = ChannelExtractor.toGray(bgRegion, channel, normLo, normHi);
+                BufferedImage bgGray = ChannelExtractor.toGray(bgRegion, channel, normLoNative, whitePointNative);
                 if (maskRoi != null) {
                     applyMask(bgGray, MaskRasterizer.rasterise(
                             maskRoi, rx, ry, bgDown, bgGray.getWidth(), bgGray.getHeight()));
@@ -6088,6 +6233,7 @@ public final class FiberAnalysisDialog {
                         return; // a newer read superseded this one
                     }
                     lastBgGray = bgGray;
+                    lastBgWhitePointNative = whitePointNative;
                     lastBgFx = fxImg;
                     lastBgW = gw;
                     lastBgH = gh;
@@ -6277,12 +6423,13 @@ public final class FiberAnalysisDialog {
         }
         // Rebuild the overlay only when the tile, threshold, or smoothing changed (the per-pixel
         // build is costly at a few MP, and redrawMask runs on every zoom/pan).
-        int thr = threshIm2();
+        int thr = threshIm2For(currentThresholdNative(), pickedTileWhitePointNative);
         double sig = smoothingSpinner.getValue();
-        if (pickedTileOverlay == null || pickedTileOverlayThr != thr || pickedTileOverlaySigma != sig) {
-            pickedTileOverlay = buildOverlayFor(pickedTileGray, 1.0); // gray is AT the selected ds
-            pickedTileOverlayThr = thr;
-            pickedTileOverlaySigma = sig;
+        if (pickedTileOverlay == null || pickedTileOverlayThrGray8 != thr || pickedTileOverlaySigmaAnalysedPx != sig) {
+            // gray is AT the selected ds
+            pickedTileOverlay = buildOverlayFor(pickedTileGray, 1.0, pickedTileWhitePointNative);
+            pickedTileOverlayThrGray8 = thr;
+            pickedTileOverlaySigmaAnalysedPx = sig;
         }
         var ov = pickedTileOverlay;
         if (ov == null) {
@@ -6311,8 +6458,8 @@ public final class FiberAnalysisDialog {
         maskTileLoading = true;
         pickedTileGrayIdx = idx; // mark intent so repeated redraws don't re-launch
         final int ch = chosenChannel();
-        final double lo = normLo;
-        final double hi = normHi;
+        final double lo = normLoNative;
+        final double hi = displayNormHiNative();
         final int fx = t.fullX;
         final int fy = t.fullY;
         final int fw = t.fullW;
@@ -6333,6 +6480,7 @@ public final class FiberAnalysisDialog {
                     return; // a newer pick/read superseded this one
                 }
                 pickedTileGray = gray;
+                pickedTileWhitePointNative = hi;
                 pickedTileGrayIdx = gray != null ? idx : -1;
                 pickedTileOverlay = null; // force a rebuild for the new tile
                 redrawMask();
@@ -6524,7 +6672,7 @@ public final class FiberAnalysisDialog {
                 Dialogs.showErrorMessage(TITLE, "Could not read the tile pixels.");
                 return;
             }
-            BufferedImage gray = ChannelExtractor.toGray(region, channel, normLo, serverNormHi());
+            BufferedImage gray = ChannelExtractor.toGray(region, channel, normLoNative, serverNormHiNative());
 
             // Filename carries the full-image x,y of the tile (read origin), size, downsample.
             String defaultName = String.format(
@@ -6623,7 +6771,7 @@ public final class FiberAnalysisDialog {
      * thresholded -- matching FIRE's own {@code ims = smooth(im); imt = ims > thr}.
      */
     private javafx.scene.image.Image buildThresholdOverlay() {
-        return buildOverlayFor(lastBgGray, lastBgRatio);
+        return buildOverlayFor(lastBgGray, lastBgRatio, lastBgWhitePointNative);
     }
 
     /**
@@ -6656,18 +6804,19 @@ public final class FiberAnalysisDialog {
         return img;
     }
 
-    private javafx.scene.image.Image buildOverlayFor(BufferedImage gray, double ratio) {
+    private javafx.scene.image.Image buildOverlayFor(BufferedImage gray, double ratio,
+            double whitePointNative) {
         if (gray == null) {
             return null;
         }
         int w = gray.getWidth();
         int h = gray.getHeight();
         int[] s = gray.getRaster().getSamples(0, 0, w, h, 0, (int[]) null);
-        double sigmaBg = smoothingSpinner.getValue() * ratio;
-        if (sigmaBg > 0.05) {
-            gaussianBlur(s, w, h, sigmaBg);
+        double sigmaBgAnalysedPx = smoothingSpinner.getValue() * ratio;
+        if (sigmaBgAnalysedPx > 0.05) {
+            gaussianBlur(s, w, h, sigmaBgAnalysedPx);
         }
-        int thr = threshIm2();
+        int thr = threshIm2For(currentThresholdNative(), whitePointNative);
         javafx.scene.image.WritableImage img = new javafx.scene.image.WritableImage(w, h);
         javafx.scene.image.PixelWriter pw = img.getPixelWriter();
         int fg = MASK_FG_ARGB; // semi-transparent violet ARGB
@@ -7154,16 +7303,17 @@ public final class FiberAnalysisDialog {
         final int ryL = ry;
         // Snapshot the mask inputs so the worker thread can build the SAME red threshold mask the
         // ① preview shows (blur by sigma, red where gray > threshIm2), read at the selected downsample.
-        final double smoothingVal = smoothingSpinner.getValue();
+        final double smoothingSigmaAnalysedPx = smoothingSpinner.getValue();
         // The threshold-only viewer (stage ①) previews the 2ND-PASS threshold when two-pass is on
         // (the always-on ① mask already shows pass 1); the with-fibres viewer stays on the main one.
         final boolean showSecondThreshold =
                 !withFibers && twoPassCheck != null && twoPassCheck.isSelected();
         final double maskThreshNative = showSecondThreshold
                 ? secondThresholdSpinner.getValue() : thresholdSpinner.getValue();
-        final int maskThr = threshIm2For(maskThreshNative);
-        final double nLo = normLo;
-        final double nHi = normHi;
+        // Same white point as the live mask, with the threshold mapped through it.
+        final double nLoNative = normLoNative;
+        final double nHiNative = displayNormHiNative();
+        final int maskThrGray8 = threshIm2For(maskThreshNative, nHiNative);
         setBusy(true, String.format(withFibers ? "Detecting tile %d/%d for the viewer…"
                 : "Rendering the threshold for tile %d/%d…", idx + 1, tiles.size()));
         // Only the fibre path runs a server detection worth logging; the threshold-only path is a
@@ -7193,8 +7343,8 @@ public final class FiberAnalysisDialog {
                     BufferedImage tileRegion = server.readRegion(RegionRequest.createInstance(
                             server.getPath(), d, tl.fullX, tl.fullY, tl.fullW, tl.fullH));
                     if (tileRegion != null) {
-                        BufferedImage tileGray = ChannelExtractor.toGray(tileRegion, channel, nLo, nHi);
-                        maskArgb = buildTileMaskArgb(tileGray, smoothingVal, maskThr);
+                        BufferedImage tileGray = ChannelExtractor.toGray(tileRegion, channel, nLoNative, nHiNative);
+                        maskArgb = buildTileMaskArgb(tileGray, smoothingSigmaAnalysedPx, maskThrGray8);
                     }
                 } catch (Exception mex) {
                     logger.warn("Tile threshold-mask read failed: {}", mex.getMessage());

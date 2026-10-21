@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.2.4 (unreleased)
+
+**Four advanced FIRE settings now use FIRE's own units.** **Direction window**, **FIRE min
+length**, **Interp. spacing** and **Dangling prune** were typed in microns and converted to
+analysis pixels, but none of them is a physical distance a user should size. Direction window
+(`s_fiberdir`) is a COUNT of vertices: FIRE takes a fibre's end direction from the vertex that many
+steps back. The other three are lengths in pixels of the image FIRE receives. On the 0.1725 µm/px
+liver image the old defaults became a 35-vertex direction window and a 174 px FIRE min length,
+longer than the fibres; at downsample 4 FIRE min length was still 43 px, above the 22 px of the
+default 15 µm **Min fiber length**, so FIRE's internal cut, not the control you tune, set the
+shortest fibre kept. They are now typed in vertices and analysis px, at FIRE's own defaults (4,
+15, 5 and 15), and sent as typed. Their saved values start fresh under new keys, and a settings
+file from an earlier version ignores them with a notice. On the regression suite's 1600 px liver region at downsample
+1 (default settings, FIRE), the dialog and the scripting API now both find 119 fibres instead of 88,
+total length 4,722 µm instead of 4,043: the 31 added fibres average about 22 µm, between the default
+Min fiber length (15 µm) and the old FIRE min length (30 µm). Flow and Centerline do not use these
+settings and are unchanged. If you compare with results from earlier versions, set the four values
+to what they used to send, which depends on your pixel size and downsample.
+
+**Distances are remembered per unit.** Every distance setting (Min fiber length, Seed spacing,
+Cross-link search box, Link distance, Max fiber width, TACS zone width, Parallel fibre distance,
+exclusion Grow regions) used to be stored as one number with no unit, so a value tuned on an
+uncalibrated image came back as microns on a calibrated one. Each is now stored once for microns
+and once for pixels; moving the dialog between the two kinds of image shows each its own values
+and relabels the controls, and the scripting API reads the set that matches the image. Loading a
+settings file saved in the other unit loads everything except the distances, and says so.
+**Run across project** now skips an image whose calibration differs from the image the dialog is
+open on, and logs why: before, it read the dialog's microns as that image's pixels. A new
+regression scenario, `batch_skips_other_unit`, checks this.
+
+**Grow regions on an uncalibrated image is in full-resolution pixels**, like every other distance.
+It was taken as analysis pixels, so the same value grew a region more at a higher downsample, and
+its label said µm whatever the image.
+
+**The threshold mask no longer goes blank on large or sparse regions.** The mask's grayscale used
+the 99.5th percentile of the region as its white point. On a mostly dark region that sits at the
+collagen's own intensity, so every bundle drew as flat white, and a threshold above it mapped to
+255 and drew an empty mask although pixels above the threshold existed. The white point now also
+covers the region's bright collagen (the 99.9th percentile of the above-threshold pixels, the
+level the image sent to FIRE is already scaled to cover), and the threshold is mapped through the
+same value as the grayscale, so the violet region is still exactly the pixels above the threshold.
+Raising the threshold to near that white point re-reads the background. On the whole liver image at
+downsample 8 (white point 12,152), a threshold of 12,760 used to draw no mask at all; it now marks
+0.25% of the preview, the pixels actually above it.
+
+**Variable names carry their units.** Intensities end in `Native`, lengths in `UserUnit` (µm, or
+full-resolution px when uncalibrated), `AnalysedPx` or `FullResPx`, angles in `Deg`, times in
+`Ms`. `FiberParams` fields are renamed accordingly (`seedSpacingUm`, which held pixels on an
+uncalibrated image, is now `seedSpacingUserUnit`), and `FiberParams.fromPreferences` takes the
+image's calibration. Field names on the wire (`Fiber.width`, `angle`, `lengthArc`) are unchanged.
+
+**Docs: the smoothing note was wrong.** Design doc 03 said Smoothing above 0 giving 0 fibres was
+"not a unit bug" and blamed the blur. It was a bug in tme-quant's `fire_2d_angle.smooth()`, which
+convolved the image's size-1 channel axis and scaled the whole image to about 40%; it was fixed on
+2026-09-12 in the tme-quant checkout. The design docs now say so.
+
 ## 0.2.3
 
 **The dialog used the intensity scale of the downsample it was opened at.** Changing **Downsample** in an

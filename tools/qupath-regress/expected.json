@@ -24,18 +24,18 @@
   },
   "fire_parallel_requested": {
     "classes": {
-      "Fiber": 88
+      "Fiber": 119
     },
-    "n": 88,
-    "roi_length": 23436.54,
+    "n": 119,
+    "roi_length": 27371.79,
     "run_ids": 1,
     "sums": {
-      "Angle (deg)": 9315.12,
-      "Curvature (deg/um)": 1516.59,
-      "Length (um)": 4042.8,
-      "Straightness": 80.75,
-      "Width mean (um)": 98.5,
-      "Width median (um)": 60.51
+      "Angle (deg)": 12457.64,
+      "Curvature (deg/um)": 2072.0,
+      "Length (um)": 4721.63,
+      "Straightness": 109.55,
+      "Width mean (um)": 130.53,
+      "Width median (um)": 83.68
     }
   },
   "flow_parallel": {
@@ -57,34 +57,34 @@
   "headless_vs_dialog": {
     "dialog": {
       "classes": {
-        "Fiber": 88
+        "Fiber": 119
       },
-      "n": 88,
-      "roi_length": 23436.54,
+      "n": 119,
+      "roi_length": 27371.79,
       "run_ids": 1,
       "sums": {
-        "Angle (deg)": 9315.12,
-        "Curvature (deg/um)": 1516.59,
-        "Length (um)": 4042.8,
-        "Straightness": 80.75,
-        "Width mean (um)": 98.5,
-        "Width median (um)": 60.51
+        "Angle (deg)": 12457.64,
+        "Curvature (deg/um)": 2072.0,
+        "Length (um)": 4721.63,
+        "Straightness": 109.55,
+        "Width mean (um)": 130.53,
+        "Width median (um)": 83.68
       }
     },
     "headless": {
       "classes": {
-        "Fiber": 88
+        "Fiber": 119
       },
-      "n": 88,
-      "roi_length": 23436.54,
+      "n": 119,
+      "roi_length": 27371.79,
       "run_ids": 1,
       "sums": {
-        "Angle (deg)": 9315.12,
-        "Curvature (deg/um)": 1516.59,
-        "Length (um)": 4042.8,
-        "Straightness": 80.75,
-        "Width mean (um)": 98.5,
-        "Width median (um)": 60.51
+        "Angle (deg)": 12457.64,
+        "Curvature (deg/um)": 2072.0,
+        "Length (um)": 4721.63,
+        "Straightness": 109.55,
+        "Width mean (um)": 130.53,
+        "Width median (um)": 83.68
       }
     }
   },

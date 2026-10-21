@@ -32,15 +32,15 @@ final class FiberPreviewOverlay extends AbstractOverlay {
     /** One polyline in full-res image px, with a cached bounding box for cheap culling. */
     private static final class Poly {
         final float[] xy; // x0,y0,x1,y1,...
-        final float widthImg; // estimated fibre thickness in full-res image px (0 = unknown)
+        final float widthFullResPx; // estimated fibre thickness in full-res image px (0 = unknown)
         final float minX;
         final float minY;
         final float maxX;
         final float maxY;
 
-        Poly(float[] xy, float widthImg) {
+        Poly(float[] xy, float widthFullResPx) {
             this.xy = xy;
-            this.widthImg = widthImg;
+            this.widthFullResPx = widthFullResPx;
             float a = Float.POSITIVE_INFINITY;
             float b = Float.POSITIVE_INFINITY;
             float c = Float.NEGATIVE_INFINITY;
@@ -127,8 +127,8 @@ final class FiberPreviewOverlay extends AbstractOverlay {
                 xy[k++] = (float) (regionY + p[1] * d);
             }
             // f.width is the estimated thickness in ANALYSED px; scale to full-res image px.
-            float wImg = (float) (f.width > 0 ? f.width * d : 0.0);
-            batch.add(new Poly(xy, wImg));
+            float widthFullResPxF = (float) (f.width > 0 ? f.width * d : 0.0);
+            batch.add(new Poly(xy, widthFullResPxF));
         }
         if (!batch.isEmpty()) {
             synchronized (polys) {
@@ -213,7 +213,7 @@ final class FiberPreviewOverlay extends AbstractOverlay {
                     if (byThick) {
                         // Stroke at the fibre's real thickness (image px); fall back to the hairline
                         // when the width is unknown. Thickness scales with zoom, like the real fibre.
-                        float sw = p.widthImg > 0 ? Math.max(p.widthImg, minW) : constW;
+                        float sw = p.widthFullResPx > 0 ? Math.max(p.widthFullResPx, minW) : constW;
                         g.setStroke(new BasicStroke(sw + pad,
                                 BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
                     }
