@@ -115,12 +115,12 @@
     },
     "n": 50,
     "restrict_inner": 37,
-    "roi_length": 7828.07,
+    "roi_length": 7828.09,
     "run_ids": 1,
     "sums": {
-      "Angle (deg)": 5053.21,
+      "Angle (deg)": 5053.2,
       "Curvature (deg/um)": 401.63,
-      "Length (um)": 1350.34,
+      "Length (um)": 1350.35,
       "Straightness": 47.54,
       "Width mean (um)": 78.03,
       "Width median (um)": 75.69

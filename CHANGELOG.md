@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.5
+
+**Restrict to selected object is fast on detailed outlines.** Each fibre used to be intersected
+with the whole outline, which costs time in proportion to the outline's vertex count, for every
+fibre. A pixel-classifier tissue outline can have tens of thousands of vertices and a whole slide
+over 100,000 fibres. The outline is now prepared once (a spatial index), so a fibre wholly inside
+it is kept unchanged and one wholly outside is dropped without an intersection; only fibres
+crossing the outline are cut. The pieces that survive are the same as before.
+
+**Run across project refuses exclusion regions on more than one image.** Exclusion regions are
+loaded for the image the dialog is open on, and the batch did not reload them per image, so every
+image was masked with the first image's nuclei, with no warning. A multi-image batch with
+**Exclude regions from fibre tracing** ticked now stops with a message. Run such images one at a
+time, each with its own regions. A batch of one image still works.
+
+**The run log's header reports exclusion regions correctly.** It said `Exclusion regions: off`
+whenever the regions had not been loaded yet, which is always the case when the header is
+written, even though the run then loaded and applied them. It now says whether they are switched
+on, and names their source.
+
+**Fibre server: run logs from a Windows QuPath land in the right folder when the server runs in
+WSL.** The server took the Windows log folder (e.g. `G:\MH_FNA2\logs\fiber-analysis`) as a
+relative Linux path and created a folder of that literal name in its working directory. A
+`X:\...` folder is now mapped to `/mnt/x/...` when that mount exists. Restart the server to pick
+this up.
+
 ## 0.2.4
 
 **Four advanced FIRE settings now use FIRE's own units.** **Direction window**, **FIRE min

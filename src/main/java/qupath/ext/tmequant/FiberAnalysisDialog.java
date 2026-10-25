@@ -3022,8 +3022,10 @@ public final class FiberAnalysisDialog {
         sb.append("   Ridge: ").append(ridgeCheck != null && ridgeCheck.isSelected());
         sb.append("   Raw mode: ").append(rawModeCheck != null && rawModeCheck.isSelected());
         if (exclusionSection != null) {
-            sb.append("\nExclusion regions: ").append(exclusionSection.isActive()
-                    ? "ON (" + exclusionSection.maxFrac() * 100 + "% drop, trim="
+            // isEnabled, not isActive: this header is written before the run loads the regions.
+            sb.append("\nExclusion regions: ").append(exclusionSection.isEnabled()
+                    ? "ON (" + exclusionSection.describeSource() + "; "
+                        + exclusionSection.maxFrac() * 100 + "% drop, trim="
                         + exclusionSection.trimEnds() + ", erase=" + exclusionSection.erase() + ")"
                     : "off");
         }
@@ -3920,6 +3922,18 @@ public final class FiberAnalysisDialog {
             extra = parseExtra();
         } catch (JsonSyntaxException | IllegalStateException ex) {
             Dialogs.showErrorMessage(TITLE, "Extra params is not valid JSON:\n" + ex.getMessage());
+            runBtn.setDisable(false);
+            return;
+        }
+        // Exclusion regions are loaded for the dialog's own image (its objects, or one GeoJSON file
+        // made for it) and the batch loop does not swap them per image, so a multi-image batch
+        // would mask every image with the first image's regions. Refuse rather than do that.
+        if (entries.size() > 1 && exclusionSection != null && exclusionSection.isEnabled()) {
+            Dialogs.showErrorMessage(TITLE, "Exclusion regions apply to one image only: they are "
+                    + "loaded for the image this dialog is open on, so the other " + (entries.size() - 1)
+                    + " image(s) would be masked with the wrong regions.\n\n"
+                    + "Either untick 'Exclude regions from fibre tracing', or run the images one at "
+                    + "a time, each with its own exclusion regions.");
             runBtn.setDisable(false);
             return;
         }

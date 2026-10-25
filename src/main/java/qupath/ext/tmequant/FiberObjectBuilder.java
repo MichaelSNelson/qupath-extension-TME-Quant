@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.prep.PreparedGeometry;
+import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
 import qupath.lib.common.ColorTools;
 import qupath.lib.geom.Point2;
 import qupath.lib.objects.PathObject;
@@ -145,13 +147,19 @@ public final class FiberObjectBuilder {
         double analysedPxToUserUnit = calibrated ? pixelSizeMicrons : 1.0; // full-res px -> unit (downsample already applied)
         String lenUnit = calibrated ? "um" : "px";
 
-        // Pre-convert the restriction ROI to a JTS geometry once.
+        // Pre-convert the restriction ROI to a JTS geometry once, and prepare it: a tissue outline
+        // can have tens of thousands of vertices, and intersecting every fibre with it costs
+        // O(vertices) each. The prepared geometry answers "wholly inside" / "wholly outside" from
+        // a spatial index, so only fibres that cross the outline pay for an intersection.
         Geometry restrictGeom = null;
+        PreparedGeometry restrictPrep = null;
         if (restrictRoi != null) {
             try {
                 restrictGeom = GeometryTools.roiToGeometry(restrictRoi);
+                restrictPrep = PreparedGeometryFactory.prepare(restrictGeom);
             } catch (Exception e) {
                 restrictGeom = null; // fall back to no clipping rather than fail the whole commit
+                restrictPrep = null;
             }
         }
 
@@ -212,7 +220,7 @@ public final class FiberObjectBuilder {
 
             // ---- Restricted: clip the fiber to the ROI and keep in-length pieces ----
             List<List<Point2>> kept = new ArrayList<>();
-            for (List<Point2> piece : clipToGeometry(pts, restrictGeom, plane)) {
+            for (List<Point2> piece : clipToGeometry(pts, restrictGeom, restrictPrep, plane)) {
                 if (piece.size() < 2) {
                     continue;
                 }
@@ -231,13 +239,27 @@ public final class FiberObjectBuilder {
         return out;
     }
 
-    /** Intersect a full-res polyline with a geometry; return each inside piece as a point list. */
-    private static List<List<Point2>> clipToGeometry(List<Point2> pts, Geometry restrictGeom, ImagePlane plane) {
+    /**
+     * Intersect a full-res polyline with a geometry; return each inside piece as a point list.
+     * A fibre wholly inside comes back unchanged as one piece, and one wholly outside as none,
+     * without computing an intersection.
+     */
+    static List<List<Point2>> clipToGeometry(
+            List<Point2> pts, Geometry restrictGeom, PreparedGeometry restrictPrep, ImagePlane plane) {
         List<List<Point2>> pieces = new ArrayList<>();
         Geometry inside;
         try {
-            ROI line = ROIs.createPolylineROI(pts, plane);
-            inside = restrictGeom.intersection(line.getGeometry());
+            Geometry line = ROIs.createPolylineROI(pts, plane).getGeometry();
+            if (restrictPrep != null) {
+                if (restrictPrep.containsProperly(line)) {
+                    pieces.add(pts);
+                    return pieces;
+                }
+                if (!restrictPrep.intersects(line)) {
+                    return pieces;
+                }
+            }
+            inside = restrictGeom.intersection(line);
         } catch (Exception e) {
             return pieces; // drop this fiber on a geometry error rather than crash the run
         }

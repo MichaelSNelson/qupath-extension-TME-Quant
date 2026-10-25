@@ -86,6 +86,7 @@ import logging
 import math
 import multiprocessing
 import os
+import re
 import socket
 import struct
 import sys
@@ -158,6 +159,20 @@ class _Tee:
 _run_log_state = {"key": None, "fh": None, "handler": None, "refs": 0, "out": None, "err": None}
 
 
+
+def _local_log_dir(log_dir):
+    """Map a Windows client's log folder to this host's path for it.
+
+    A Windows QuPath sends e.g. ``G:\\MH_FNA2\\logs\\fiber-analysis``. A server running in WSL
+    would otherwise treat that as a relative path and create a folder with that literal name in
+    its working directory; under WSL the drive is mounted at ``/mnt/g``.
+    """
+    if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", log_dir):
+        mapped = "/mnt/" + log_dir[0].lower() + "/" + log_dir[3:].replace("\\", "/")
+        if os.path.isdir("/mnt/" + log_dir[0].lower()):
+            return mapped
+    return log_dir
+
 @contextlib.contextmanager
 def _run_file_logging(log_dir, log_file):
     """Append this request's full log (logger lines + FIRE prints) to
@@ -176,6 +191,7 @@ def _run_file_logging(log_dir, log_file):
     if not log_dir or not log_file:
         yield
         return
+    log_dir = _local_log_dir(log_dir)
     key = os.path.join(log_dir, log_file)
     joined = False
     with _run_log_lock:

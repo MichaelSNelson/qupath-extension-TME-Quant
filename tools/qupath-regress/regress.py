@@ -76,6 +76,13 @@ class Mcp:
             "protocolVersion": "2025-06-18", "capabilities": {},
             "clientInfo": {"name": "tmequant-regress", "title": "TME Quant regression", "version": "1"}}})
         self._post({"method": "notifications/initialized"})
+        # Newer qupath-mcp builds (0.1.5-log.4+) ask each client to name itself and append a
+        # reminder to every reply until it does; older builds have no qupath_hello.
+        try:
+            self.call("qupath_hello", agent=os.environ.get("MCP_AGENT", "TMEQUANT"),
+                      purpose=os.environ.get("MCP_PURPOSE", "TME Quant regression / runs"))
+        except RuntimeError:
+            pass
 
     def call(self, tool, **args):
         r = self._post({"method": "tools/call", "params": {"name": tool, "arguments": args}})
@@ -83,6 +90,7 @@ class Mcp:
             raise RuntimeError(f"{tool}: {r['error']}")
         res = r["result"]
         text = "\n".join(c.get("text", "") for c in res.get("content", []) if c.get("type") == "text")
+        text = "\n".join(l for l in text.split("\n") if not l.startswith("Name this chat with qupath_hello"))
         if res.get("isError"):
             raise RuntimeError(f"{tool}{args}: {text}")
         return text
