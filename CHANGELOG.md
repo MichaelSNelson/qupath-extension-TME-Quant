@@ -1,12 +1,21 @@
 # Changelog
 
+## 0.2.6
+
+**The dialog says which settings the Centerline and Flow tracers ignore.** Smoothing, Seed
+spacing, Seed sensitivity, the link, bend and extend settings and the Detection preset only reach
+FIRE. With Centerline or Flow they have no effect, which the dialog did not say: a run on Flow at
+Smoothing 1 and at Smoothing 0 gave the same fibers. The Tracer tooltip now describes Flow and
+lists what the other two tracers use, and the Smoothing and Seed spacing tooltips start or end
+with "FIRE tracer only". No change to results.
+
 ## 0.2.5
 
-**Restrict to selected object is fast on detailed outlines.** Each fibre used to be intersected
+**Restrict to selected object is fast on detailed outlines.** Each fiber used to be intersected
 with the whole outline, which costs time in proportion to the outline's vertex count, for every
-fibre. A pixel-classifier tissue outline can have tens of thousands of vertices and a whole slide
-over 100,000 fibres. The outline is now prepared once (a spatial index), so a fibre wholly inside
-it is kept unchanged and one wholly outside is dropped without an intersection; only fibres
+fiber. A pixel-classifier tissue outline can have tens of thousands of vertices and a whole slide
+over 100,000 fibers. The outline is now prepared once (a spatial index), so a fiber wholly inside
+it is kept unchanged and one wholly outside is dropped without an intersection; only fibers
 crossing the outline are cut. The pieces that survive are the same as before.
 
 **Run across project refuses exclusion regions on more than one image.** Exclusion regions are
@@ -20,7 +29,7 @@ whenever the regions had not been loaded yet, which is always the case when the 
 written, even though the run then loaded and applied them. It now says whether they are switched
 on, and names their source.
 
-**Fibre server: run logs from a Windows QuPath land in the right folder when the server runs in
+**Fiber server: run logs from a Windows QuPath land in the right folder when the server runs in
 WSL.** The server took the Windows log folder (e.g. `G:\MH_FNA2\logs\fiber-analysis`) as a
 relative Linux path and created a folder of that literal name in its working directory. A
 `X:\...` folder is now mapped to `/mnt/x/...` when that mount exists. Restart the server to pick

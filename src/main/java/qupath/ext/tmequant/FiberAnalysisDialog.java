@@ -849,7 +849,9 @@ public final class FiberAnalysisDialog {
                         + "CAUTION: raising this ADDS red to the mask (blur spreads bright collagen) "
                         + "but also ERASES the thin ridges FIRE traces — too much and detection finds "
                         + "NOTHING even though the mask looks full. Keep it low (0–1, up to ~2 for "
-                        + "very noisy images); if Suggest finds 0 fibers, lower this first."));
+                        + "very noisy images); if Suggest finds 0 fibers, lower this first.\n"
+                        + "FIRE tracer only: Centerline and Flow trace the unblurred image, so this has "
+                        + "no effect on them (the live mask still shows the blur)."));
         distSmoothSpinner.setTooltip(ttip(
                 "Extra smoothing of the internal distance map before seeds are placed (sigma_d, in "
                         + "analysis px at the current downsample — NOT microns). "
@@ -917,19 +919,21 @@ public final class FiberAnalysisDialog {
                         + "microns (full-resolution pixels on an uncalibrated image)"
                         + ". Raise to drop noise specks/fragments; lower to keep short fibers."));
         seedSpacingSpinner.setTooltip(ttip(
-                "IMPACT ON RESULTS: LOWER = more fibres detected and traces follow CURVES closely; "
-                        + "HIGHER = fibres are MISSED entirely and curves flatten into straight chords "
-                        + "that can cut across gaps. (Example: on one tile, 58→8 tripled the fibres "
+                "FIRE tracer only: Centerline does not seed, and Flow seeds every third of the "
+                        + "'Parallel fibre distance', so this has no effect on them.\n"
+                        + "IMPACT ON RESULTS: LOWER = more fibers detected and traces follow CURVES closely; "
+                        + "HIGHER = fibers are MISSED entirely and curves flatten into straight chords "
+                        + "that can cut across gaps. (Example: on one tile, 58→8 tripled the fibers "
                         + "found, 134→391.)\n"
                         + "This is the spacing of FIRE's nucleation points across the WHOLE image "
-                        + "(thresh_LMPdist) — the granularity at which fibres are seeded AND the spacing "
-                        + "of the vertices along each traced fibre. It is NOT a minimum separation "
-                        + "between two distinct fibres. Too high and FIRE places too few points to land "
-                        + "on every fibre or to bend around its curves.\n"
+                        + "(thresh_LMPdist) — the granularity at which fibers are seeded AND the spacing "
+                        + "of the vertices along each traced fiber. It is NOT a minimum separation "
+                        + "between two distinct fibers. Too high and FIRE places too few points to land "
+                        + "on every fiber or to bend around its curves.\n"
                         + "In " + "microns (full-resolution pixels on an uncalibrated image)"
                         + " (converted to analysis pixels at run time, so it stays fixed when you change "
-                        + "downsample). Lower costs more memory/time. Tip: set it near your fibre width "
-                        + "or a fraction of your shortest fibre."));
+                        + "downsample). Lower costs more memory/time. Tip: set it near your fiber width "
+                        + "or a fraction of your shortest fiber."));
         downsampleSpinner.setTooltip(ttip(
                 "Resolution reduction before analysis: 2 = half resolution (~4× faster, coarser). "
                         + "Use 1 for small/high-mag regions; 2–8 for large regions. The engine is tuned "
@@ -1111,15 +1115,21 @@ public final class FiberAnalysisDialog {
         tracerCombo.setValue(TRACER_FIRE);
         tracerCombo.setMaxWidth(Double.MAX_VALUE);
         tracerCombo.setPrefWidth(150);
-        tracerCombo.setTooltip(ttip("How fibres are traced.\n\n"
+        tracerCombo.setTooltip(ttip("How fibers are traced.\n\n"
                 + "FIRE (seed & extend) — CT-FIRE's own method: seeds nucleation points and extends them "
                 + "along the distance map. Keep this when you need results comparable to CT-FIRE.\n\n"
-                + "Centerline (medial axis) — skeletonises the thresholded collagen and follows each "
-                + "bundle's centre line, so crimp/waviness and sharp kinks are preserved and it cannot "
+                + "Centerline (medial axis) — skeletonizes the thresholded collagen and follows each "
+                + "bundle's center line, so crimp/waviness and sharp kinks are preserved and it cannot "
                 + "make radial 'star' artifacts. Better for waviness measurements; NOT the CT-FIRE "
                 + "algorithm, so numbers are not directly comparable to CT-FIRE literature.\n\n"
-                + "Both produce the same measurements (length, angle, straightness, width mean/max/SD) "
-                + "and both work with Preview."));
+                + "Flow (orientation field) — follows the local fiber direction through the thresholded "
+                + "collagen and keeps the longest traces, spaced by the 'Parallel fibre distance'. Also "
+                + "NOT the CT-FIRE algorithm.\n\n"
+                + "Centerline and Flow use the Background threshold and Min fiber length; the FIRE "
+                + "settings (Smoothing, Seed spacing, Seed sensitivity, the link, bend and extend "
+                + "settings, Detection preset) have no effect on them.\n\n"
+                + "All three produce the same measurements (length, angle, straightness, width "
+                + "mean/max/SD) and all work with Preview."));
         rememberCombo(tracerCombo, FiberSocketPreferences.tracerProperty());
         rememberPerUnit(flowParallelSpinner, FiberSocketPreferences.flowParallelProperty());
         t2.addRow(r2++, lbl("Tracer"), tracerCombo);

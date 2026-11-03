@@ -203,6 +203,9 @@ def open_dialog(q):
     q.call("qupath_wait", text="Apply to chosen area", window=DIALOG, timeout_s=60)
     q.groovy(f'''def w = window("{DIALOG}")
 fx {{ w.scene.root.lookupAll(".titled-pane").each {{ it.setExpanded(true) }} }}
+// The dialog remembers exclusion regions between runs; no scenario uses them, so start without.
+def ex = fx {{ w.scene.root.lookupAll("*").find {{ it.getClass().getSimpleName() == "ExclusionSection" }} }}
+if (ex != null) fx {{ ex.enableCheck.setSelected(false) }}
 return "ok"''')
 
 
