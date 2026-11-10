@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.7
+
+**Smoothing works with the FIRE tracer on an unmodified tme-quant.** CT-FIRE's `smooth()` dims a
+2D image by the blur kernel's center weight (0.40 at Smoothing 1, 0.20 at 2), as MATLAB CT-FIRE
+does, before applying the threshold. A threshold set on the dialog's mask therefore acted like
+2.5x higher at Smoothing 1, and above about 1.4 nothing passed and FIRE found 0 fibers. Until
+now the only fix was a local edit to tme-quant (uw-loci/tme-quant#62, unmerged), which a
+tme-quant update would undo. The fiber server now lowers the threshold it sends FIRE by the same
+factor, so FIRE keeps the pixels the mask shows, to within one dimmed gray level (up to 2.4% of
+the mask differs at Smoothing 1, 9% at Smoothing 3). CT-FIRE itself is unchanged. The server
+checks that the loaded CT-FIRE actually dims and leaves the threshold alone if it does not.
+Smoothing 0, and the Centerline and Flow tracers, are not affected. Restart the server to pick
+this up.
+
+**UI and log text in American English.** "fibre" is now "fiber" (and "analysed", "colour",
+"centre" and the like are spelled the American way) in labels, tooltips, messages and log lines.
+Seven labels changed: **Parallel fiber distance**, **Exclude regions from fiber tracing**,
+**Drop fiber if ≥ (% inside)**, **Trim fiber ends that sit inside an excluded region**,
+**Also erase excluded regions before tracing (cuts crossing fibers)**, **Remove cross-flow
+fibers** and **Anti-flow check (adds a per-fiber score)**. Scripts that find these controls by
+their label need the new text. Preference keys, measurement names and saved data are unchanged.
+
+**Regression suite.** The suite now also resets Smoothing, Seed spacing, the Anti-flow check and
+the Detection preset before each scenario. Earlier runs had left Seed spacing at 8 and the
+Anti-flow check on, which is why two FIRE scenarios found 118 fibers instead of the recorded
+119 since 0.2.4. A new `fire_smoothing` scenario traces FIRE at Smoothing 1 on an unmodified
+tme-quant.
+
 ## 0.2.6
 
 **The dialog says which settings the Centerline and Flow tracers ignore.** Smoothing, Seed

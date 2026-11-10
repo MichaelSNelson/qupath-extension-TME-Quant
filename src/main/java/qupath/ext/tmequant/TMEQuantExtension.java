@@ -89,7 +89,7 @@ public final class TMEQuantExtension implements QuPathExtension {
             pane.addPropertyPreference(
                     FiberSocketPreferences.maxTileDimProperty(), Double.class,
                     "Max tile size (px)", EXTENSION_NAME,
-                    "Largest tile (analysed px per side) a region is split into for FIRE. Bigger = "
+                    "Largest tile (analyzed px per side) a region is split into for FIRE. Bigger = "
                             + "fewer tiles (faster, fewer round-trips) but heavier per tile; a huge "
                             + "region makes MORE tiles rather than giant ones. The Analyze dialog shows "
                             + "the resulting physical tile size next to Downsample. Default 2048.");

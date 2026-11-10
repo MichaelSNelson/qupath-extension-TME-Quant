@@ -104,9 +104,9 @@ public final class ExclusionSection extends VBox {
         this.projectDir = projectDir == null ? () -> null : projectDir;
         setPadding(new Insets(8));
 
-        enableCheck = new CheckBox("Exclude regions from fibre tracing");
+        enableCheck = new CheckBox("Exclude regions from fiber tracing");
         enableCheck.setTooltip(ttip(
-                "Off by default. When on, fibres are not reported inside the regions you choose "
+                "Off by default. When on, fibers are not reported inside the regions you choose "
                 + "below — typically nuclei segmented from the paired brightfield image, which are "
                 + "birefringent and get traced as short false 'circles'."));
 
@@ -168,25 +168,25 @@ public final class ExclusionSection extends VBox {
         maxFracSpinner.setEditable(true);
         maxFracSpinner.setPrefWidth(90);
         maxFracSpinner.setTooltip(ttip(
-                "Drop a fibre when at least this much of its length lies inside an excluded region "
-                + "— such a fibre IS the excluded object rather than collagen crossing it. LOWER is "
-                + "more aggressive and starts removing genuine fibres that merely pass through a "
+                "Drop a fiber when at least this much of its length lies inside an excluded region "
+                + "— such a fiber IS the excluded object rather than collagen crossing it. LOWER is "
+                + "more aggressive and starts removing genuine fibers that merely pass through a "
                 + "nucleus; 0 turns the rule off and only trimming applies."));
 
-        trimCheck = new CheckBox("Trim fibre ends that sit inside an excluded region");
+        trimCheck = new CheckBox("Trim fiber ends that sit inside an excluded region");
         trimCheck.setSelected(true);
         trimCheck.setTooltip(ttip(
-                "Peel back the START and END of a fibre while it lies inside an excluded region, "
+                "Peel back the START and END of a fiber while it lies inside an excluded region, "
                 + "keeping the part on real collagen. This removes the spokes that radiate out of a "
-                + "nucleus without discarding the fibre they run into. The MIDDLE is never trimmed, "
-                + "so a fibre crossing a nucleus stays whole."));
+                + "nucleus without discarding the fiber they run into. The MIDDLE is never trimmed, "
+                + "so a fiber crossing a nucleus stays whole."));
 
-        eraseCheck = new CheckBox("Also erase excluded regions before tracing (cuts crossing fibres)");
+        eraseCheck = new CheckBox("Also erase excluded regions before tracing (cuts crossing fibers)");
         eraseCheck.setTooltip(ttip(
                 "Removes the excluded pixels from the image so they can never be traced, and stops "
                 + "them inflating the density/seed guards (on a nucleus-rich field ~34% of the "
                 + "thresholded 'collagen' was nuclei, which drove the guard to raise the threshold "
-                + "and under-detect real collagen). The cost: a fibre CROSSING an excluded object "
+                + "and under-detect real collagen). The cost: a fiber CROSSING an excluded object "
                 + "is cut in two. Off by default — try it only if the guards are misfiring."));
 
         loadBtn = new Button("Load regions");
@@ -212,7 +212,7 @@ public final class ExclusionSection extends VBox {
         g.add(roiBox, 1, r++);
         g.add(dilateLabel, 0, r);
         g.add(dilateSpinner, 1, r++);
-        g.add(new Label("Drop fibre if ≥ (% inside)"), 0, r);
+        g.add(new Label("Drop fiber if ≥ (% inside)"), 0, r);
         g.add(maxFracSpinner, 1, r++);
         g.add(trimCheck, 0, r++, 2, 1);
         g.add(eraseCheck, 0, r++, 2, 1);

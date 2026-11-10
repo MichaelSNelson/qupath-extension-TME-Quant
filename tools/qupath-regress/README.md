@@ -14,7 +14,7 @@ python3 regress.py tacs flow_parallel # a subset
 python3 regress.py --record           # after an intended change: rewrite expected.json
 ```
 
-A run takes about 7 minutes and ends with `9/9 passed`, or a list of scenarios with the field that
+A run takes about 7 minutes and ends with `10/10 passed`, or a list of scenarios with the field that
 changed in each (`dialog.n: 88 -> 97`). For each failed scenario it also saves every open QuPath window
 (the dialog and the viewer) as PNGs in `$REGRESS_DIR/failures/<date>-<time>/`, plus a text outline
 of the open TME Quant dialogs with every control's value (a screenshot shows only the scrolled-to part),
@@ -27,15 +27,20 @@ and lists the files. The main-window PNG is several MB on a HiDPI screen; nothin
 | `flow_parallel` | Flow, Parallel tiles 4 gives exactly the serial result | 2400 px region |
 | `centerline_parallel` | the same for Centerline | 2400 px region |
 | `fire_parallel_requested` | FIRE with Parallel tiles 4 is unchanged and no tile times out | 1600 px region |
+| `fire_smoothing` | FIRE at Smoothing 1 on an unmodified tme-quant finds at least half the fibers it finds at Smoothing 0 (without the server's threshold compensation it finds about 5%) | the Smoothing 1 run |
 | `headless_vs_dialog` | `TMEQuant.detectFibersInAnnotations` equals the dialog on the same region; the dialog is opened at downsample 2 and switched to 1 first | both runs |
 | `restrict_to_object` | fibres with both ends well inside an ellipse are unchanged by **Restrict to selected object** | the restricted run |
 | `tacs` | TACS against an ellipse boundary assigns several TACS classes | 3000 px region |
 | `batch_two_images` | **Run across project** over two images gives fibres in each, with a **Finished.** summary | per-image counts |
 | `batch_skips_other_unit` | **Run across project** over a calibrated and an uncalibrated copy traces the calibrated one and skips the other, saying why (the dialog's µm settings would be read as px) | none |
-| `large_postprocess` | a whole-image run over 20,000 fibres takes the blocked post-process path, both passes, no failed block | 35,583 fibres |
+| `large_postprocess` | a whole-image run over 20,000 fibers takes the blocked post-process path, both passes, no failed block | 35,583 fibres |
 
-Every scenario first sets downsample, threshold, minimum length, tracer and the output checkboxes,
-because the dialog persists its settings between runs.
+Every scenario first sets downsample, threshold, minimum length, Smoothing, Seed spacing, the
+Anti-flow check, the Detection preset, the tracer and the output checkboxes, and unticks exclusion
+regions, because the dialog persists its settings between runs. Settings left by other work once
+moved the FIRE baselines from 119 to 118 fibers. The fingerprints are recorded with the scenarios
+run in this order: run on its own, `fire_parallel_requested` finds 120 fibers instead of 119,
+because its tiles come out 2 px smaller (not yet explained).
 
 ## Setup
 

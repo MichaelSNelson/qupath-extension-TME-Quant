@@ -5,20 +5,24 @@
 > the user sets in the dialog becomes the number CT-FIRE sees. All Java references are in
 > `FiberAnalysisDialog.java` unless noted.
 >
-> **Smoothing above 0 used to give 0 fibres. That was a bug, fixed on 2026-09-12.** On
-> 2026-08-13 this doc called it "not a unit bug" and blamed a σ=1 blur for flattening thin
-> ridges below `thresh_im2`. That explanation was wrong. The cause was in tme-quant's
-> `fire_2d_angle.smooth()`: the 2-D image arrives shaped `(1, J, I)`, and `smooth()` convolved
-> every axis, including the size-1 channel axis, with zero padding. Along that axis the
-> convolution only multiplies the image by the kernel's centre weight, about 0.4 for any
-> sigma > 0. The whole image dropped to ~40% of its brightness, the client's `thresh_im2`
-> (computed for the unattenuated image) then rejected almost everything, and nothing nucleated.
-> `sigma_im = 0` returns early, which is why only 0 worked. The fix skips any axis of size 1. It
-> lives in `tme-quant/src/ctfire_py/fire_2d_angle.py` (and its twin under
-> `src/tme_quant/src/ctfire_py/`), which this repository does not ship. It is submitted upstream
-> as [uw-loci/tme-quant#62](https://github.com/uw-loci/tme-quant/pull/62) (open, not yet merged as
-> of 2026-10-21); until it is merged, a tme-quant checkout has the fix only if it has that branch
-> or the same local edit. FIRE's own default is still `sigma_im = 0`, and the extension defaults to it.
+> **Smoothing with the FIRE tracer: CT-FIRE dims the image, and the server compensates (0.2.7).**
+> CT-FIRE's `smooth()` (tme-quant `fire_2d_angle.py`, as MATLAB's `smooth.m`) filters every axis of
+> the `(1, J, I)` image with zero padding, so along the size-1 axis each pixel is multiplied by the
+> kernel's center weight: 0.79 at sigma 0.5, 0.40 at 1, 0.20 at 2, 0.14 at 3. FIRE then rounds and
+> keeps `ims > thresh_im2`, so a threshold set on the dialog's mask acted like 2.5x higher at
+> Smoothing 1, and above about 1.4 nothing passed (0 fibers). This is deliberate CT-FIRE parity,
+> not a tme-quant bug, so tme-quant is left as published. Since 0.2.7 the server sends FIRE
+> `round(w * (thresh_im2 + 0.5) + 0.5) - 1` (`w` = center weight), which keeps the same pixels as the
+> mask to within one dimmed gray level (`fiber_socket_server._fire_params_for_smoothing`). On a
+> 1200 px liver crop the two masks differ by at most 2.4% of the mask up to Smoothing 1 and 9% at
+> Smoothing 3, where one dimmed level spans 7 gray levels. The server checks once that the loaded
+> `smooth()` dims and sends the threshold unchanged if it does not (a tme-quant with
+> uw-loci/tme-quant#62 or the old local edit). `sigma_d` needs nothing: the distance map is 2D by
+> then, so it is only blurred. Centerline and Flow never smooth. The dialog's mask blurs with a
+> slightly wider kernel (radius `ceil(3 sigma)` against FIRE's `ceil(2 sigma)`) and clamps at the
+> edges instead of zero padding; tile overlap hides the edges. History: on 2026-09-12 this was
+> "fixed" by editing tme-quant to skip the size-1 axis (PR #62, "do not merge as is"); that edit
+> was removed from the server's checkout on 2026-11-09.
 
 ---
 
@@ -138,7 +142,7 @@ settings file's `fiberDir`, `fireFlen`, `maxSpace` and `dangLen` are ignored, wi
 
 ### Unit-scoped persistence (0.2.4)
 Every user-unit distance (Min fiber length, Seed spacing, Cross-link box, Link distance, Max
-width, TACS zone, Parallel fibre distance, exclusion Grow regions) is stored once per unit
+width, TACS zone, Parallel fiber distance, exclusion Grow regions) is stored once per unit
 (`FiberSocketPreferences.UnitScopedDouble`): `tmequant.<name>Um` for calibrated images and
 `tmequant.<name>FullResPx` for uncalibrated ones. The dialog reads and writes the store for the
 current image's calibration and reloads all of them, and relabels them, when it follows the
@@ -212,13 +216,9 @@ fixed/base parameter, not at the swept axes.
 
 ## 8. Known issues and their status (updated 2026-10-20)
 
-0. **Smoothing above 0 gave 0 fibres: fixed 2026-09-12, in tme-quant.** The cause was
-   `fire_2d_angle.smooth()` convolving the size-1 channel axis of the `(1, J, I)` image with zero
-   padding, which scaled the whole image to about 40% (see the note at the top). The 2026-08-13
-   entry that stood here called it "not a unit bug" and blamed the blur itself; that explanation
-   was wrong, and its advice to keep `sigma_im = 0` on thin collagen is not needed with the fix.
-   The fix is [uw-loci/tme-quant#62](https://github.com/uw-loci/tme-quant/pull/62), open and not
-   yet merged as of 2026-10-21.
+0. **Smoothing above 0 gave 0 fibers with FIRE: compensated in the server, 0.2.7.** CT-FIRE
+   dims the image by the kernel's center weight; the server scales `thresh_im2` to match (see the
+   note at the top). The 2026-09-12 tme-quant edit (uw-loci/tme-quant#62) is no longer used.
 1. **Advanced structural params treated as µm: fixed in 0.2.4** (§4). `s_fiberdir` is a vertex
    count; `thresh_flen`, `s_maxspace` and `thresh_dang_L` are analysis px. All four are sent as
    typed. `s_xlinkbox` and `thresh_linkd` stay in the user unit: both are real distances in the
@@ -231,9 +231,10 @@ fixed/base parameter, not at the swept axes.
 
 ## 9. Debugging checklist for "0 fibers"
 
-0. **Check smoothing (§8.0).** If every run at Smoothing > 0 returns `Fiber segments: 0` and
-   Smoothing = 0 traces, the server is running a tme-quant without the 2026-09-12 `smooth()` fix.
-   Apply it (or set Smoothing to 0) and restart the server.
+0. **Check smoothing (§8.0).** If every FIRE run at Smoothing > 0 returns `Fiber segments: 0` and
+   Smoothing = 0 traces, the server predates 0.2.7 (no threshold compensation): update
+   `fiber_socket_server.py` and restart it, or set Smoothing to 0. The server log's
+   "CT-FIRE smooth() ... scales a flat 2D image" line says whether it is compensating.
 1. `Ping` says `real`? If synthetic → engine not loaded (`04`).
 2. Run **Self-test fiber engine** → PASS means the engine *loads and traces the synthetic image*.
    Note: a PASS does **not** prove the build traces *real* images correctly (§8.0) — it only rules

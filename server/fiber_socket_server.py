@@ -2016,6 +2016,73 @@ def _shutdown_pools():
     _TRACE_EXECUTOR = None
 
 
+def _smoothing_center_weight(sigma):
+    """Factor by which CT-FIRE's ``smooth()`` scales a 2D image at ``sigma``.
+
+    FIRE smooths a ``1 x H x W`` volume and filters every axis with zero padding, so along the
+    size-1 axis each pixel is multiplied by the kernel's center weight (radius ``ceil(2 sigma)``,
+    as in ``smooth.m``): 0.79 at sigma 0.5, 0.40 at 1, 0.20 at 2. MATLAB CT-FIRE does the same.
+    """
+    radius = int(np.ceil(2.0 * sigma))
+    x = np.arange(-radius, radius + 1, dtype=float)
+    return 1.0 / float(np.exp(-(x ** 2) / (2.0 * sigma ** 2)).sum())
+
+
+def _fire_params_for_smoothing(fire_params_value):
+    """Return FIRE params with ``thresh_im2`` scaled for CT-FIRE's smoothing dimming.
+
+    The dialog's mask keeps pixels whose blurred, rounded value is above ``thresh_im2``. FIRE keeps
+    ``round(weight * blurred) > thresh_im2``, so at Smoothing 1 a threshold of 77 acted like 191 and
+    above about 1.4 nothing passed (0 fibers). Sending ``round(weight * (thresh_im2 + 0.5) + 0.5) - 1``
+    makes FIRE keep the same pixels, to within one dimmed grey level (``1 / weight`` levels of the
+    original). CT-FIRE itself is left as published. Only applies with Smoothing above 0 and an
+    absolute threshold; a relative ``thresh_im`` is unaffected by the dimming.
+    """
+    sigma = fire_params_value.get("sigma_im")
+    thr = fire_params_value.get("thresh_im2")
+    rel = fire_params_value.get("thresh_im")
+    if (not isinstance(sigma, (int, float)) or sigma <= 0 or thr is None
+            or (rel is not None and np.asarray(rel).size != 0)):
+        return fire_params_value
+    if not _fire_smooth_dims():
+        return fire_params_value
+    weight = _smoothing_center_weight(float(sigma))
+    sent = int(round(weight * (float(thr) + 0.5) + 0.5)) - 1
+    key = (float(sigma), float(thr))
+    if key not in _SMOOTHING_LOGGED:
+        _SMOOTHING_LOGGED.add(key)
+        logger.info("Smoothing %.2f: CT-FIRE scales the image by %.3f, so FIRE gets thresh_im2 %d "
+                    "for the dialog's %s (same pixels as the mask).", sigma, weight, sent, thr)
+    out = dict(fire_params_value)
+    out["thresh_im2"] = sent
+    return out
+
+
+_SMOOTHING_LOGGED = set()
+_SMOOTH_DIMS = None
+
+
+def _fire_smooth_dims():
+    """True if the loaded CT-FIRE ``smooth()`` dims a 2D image (upstream behavior).
+
+    A tme-quant with the size-1-axis fix (uw-loci/tme-quant#62, or a local edit) does not dim, and
+    compensating there would lower the threshold for nothing. Checked once on a flat image.
+    """
+    global _SMOOTH_DIMS
+    if _SMOOTH_DIMS is None:
+        mod = sys.modules.get("ctfire_py.fire_2d_angle")
+        smooth = getattr(mod, "smooth", None)
+        if smooth is None:
+            return True  # not loaded yet; upstream dims
+        center = float(smooth(np.ones((1, 9, 9)), 1.0)[0, 4, 4])
+        _SMOOTH_DIMS = center < 0.9
+        logger.info("CT-FIRE smooth() from %s scales a flat 2D image to %.3f at sigma 1: %s.",
+                    getattr(mod, "__file__", "?"), center,
+                    "compensating thresh_im2 for Smoothing" if _SMOOTH_DIMS
+                    else "no dimming, thresh_im2 sent as set")
+    return _SMOOTH_DIMS
+
+
 def _run_fire(fire_params_value, ll1, image):
     """Run FIRE, isolated in a worker subprocess when possible.
 
@@ -2024,6 +2091,7 @@ def _run_fire(fire_params_value, ll1, image):
     catchable MemoryError / bad_alloc) propagate to the caller unchanged.
     """
     global _USE_WORKER
+    fire_params_value = _fire_params_for_smoothing(fire_params_value)
     if not (_USE_WORKER and _REPO_ROOT is not None):
         return _inprocess_fire(fire_params_value, ll1, image)
 

@@ -74,7 +74,7 @@ final class PostProcessBlocks {
         int gy = Math.max(1, (int) Math.ceil(nBlocks / (double) gx));
         int bw = Math.max(1, (int) Math.ceil(rwA / (double) gx));
         int bh = Math.max(1, (int) Math.ceil(rhA / (double) gy));
-        logger.info("Post-process in blocks: {} fibres, {}x{} grid of {}x{} analysed px, 2 passes",
+        logger.info("Post-process in blocks: {} fibers, {}x{} grid of {}x{} analyzed px, 2 passes",
                 all.size(), gx, gy, bw, bh);
         List<FiberSocketClient.Fiber> cur = all;
         for (int pass = 1; pass <= 2; pass++) {
@@ -97,7 +97,7 @@ final class PostProcessBlocks {
                 done++;
                 List<FiberSocketClient.Fiber> part = e.getValue();
                 status.accept(String.format(
-                        "Stitching seams — pass %d of 2, block %d/%d (%d fibres)…",
+                        "Stitching seams — pass %d of 2, block %d/%d (%d fibers)…",
                         pass, done, blocks.size(), part.size()));
                 if (part.size() < 2) {
                     next.addAll(part);
@@ -113,7 +113,7 @@ final class PostProcessBlocks {
                     next.addAll(part);
                 }
             }
-            logger.info("Post-process pass {}/2: {} -> {} fibres over {} block(s)",
+            logger.info("Post-process pass {}/2: {} -> {} fibers over {} block(s)",
                     pass, before, next.size(), blocks.size());
             cur = next;
         }

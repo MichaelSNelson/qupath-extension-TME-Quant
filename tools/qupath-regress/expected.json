@@ -4,7 +4,7 @@
       "liver_a": 69,
       "liver_b": 66
     },
-    "summary": "2 / 2 image(s), 135 fibre(s) written"
+    "summary": "2 / 2 image(s), 135 fiber(s) written"
   },
   "centerline_parallel": {
     "classes": {
@@ -36,6 +36,22 @@
       "Straightness": 109.55,
       "Width mean (um)": 130.53,
       "Width median (um)": 83.68
+    }
+  },
+  "fire_smoothing": {
+    "classes": {
+      "Fiber": 108
+    },
+    "n": 108,
+    "roi_length": 28189.32,
+    "run_ids": 1,
+    "sums": {
+      "Angle (deg)": 11207.67,
+      "Curvature (deg/um)": 1778.97,
+      "Length (um)": 4862.66,
+      "Straightness": 99.99,
+      "Width mean (um)": 113.66,
+      "Width median (um)": 70.36
     }
   },
   "flow_parallel": {
@@ -89,14 +105,14 @@
     }
   },
   "large_postprocess": {
-    "blocked": "Post-process in blocks: 35672 fibres, 2x1 grid of 5160x7720 analysed px, 2 passes",
+    "blocked": "Post-process in blocks: 35672 fibers, 2x1 grid of 5160x7720 analyzed px, 2 passes",
     "classes": {
       "Fiber": 35583
     },
     "n": 35583,
     "passes": [
-      "Post-process pass 1/2: 35672 -> 35587 fibres over 2 block(s)",
-      "Post-process pass 2/2: 35587 -> 35583 fibres over 6 block(s)"
+      "Post-process pass 1/2: 35672 -> 35587 fibers over 2 block(s)",
+      "Post-process pass 2/2: 35587 -> 35583 fibers over 6 block(s)"
     ],
     "roi_length": 1831729.18,
     "run_ids": 1,

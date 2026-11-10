@@ -331,7 +331,7 @@ public final class FiberEngine {
                 normLoNative, normHiNative, collagenLevelNative, null, null);
         double serverNormHiNative = p.whitePoint(normLoNative, normHiNative, collagenLevelNative);
         logProgress(log, String.format(
-                "TME-Quant: region %dx%d @(%d,%d) downsample=%s -> %d analysed px -> %d tile(s)",
+                "TME-Quant: region %dx%d @(%d,%d) downsample=%s -> %d analyzed px -> %d tile(s)",
                 rw, rh, rx, ry, trim(d), rwA * rhA, tiles.size()));
 
         FiberSocketClient client = new FiberSocketClient(host, port);
@@ -393,7 +393,7 @@ public final class FiberEngine {
 
         List<FiberSocketClient.Fiber> finalFibers = all;
         if (tiles.size() > 1 && !all.isEmpty()) {
-            logProgress(log, "Stitching seams… (" + all.size() + " fibres)");
+            logProgress(log, "Stitching seams… (" + all.size() + " fibers)");
             PostProcessBlocks.MetaBuilder meta = part ->
                     p.buildPostMeta(part, d, calibrated, pixelSizeMicrons, true, null, null);
             if (PostProcessBlocks.needsBlocking(all.size())) {
@@ -416,7 +416,7 @@ public final class FiberEngine {
             }
         }
         if (failedTiles > 0) {
-            logger.warn("{} of {} tiles were too dense to analyse even after auto-coarsening seeds.",
+            logger.warn("{} of {} tiles were too dense to analyze even after auto-coarsening seeds.",
                     failedTiles, tiles.size());
         }
         AnalyzeResult ar = new AnalyzeResult(finalFibers, backend[0], tiles.size());

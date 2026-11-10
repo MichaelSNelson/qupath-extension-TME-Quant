@@ -581,8 +581,8 @@ public final class FiberAnalysisDialog {
         twoPassCheck.setWrapText(true);
         twoPassCheck.setTooltip(ttip(
                 "Run detection TWICE and merge: pass 1 at the Background threshold above, pass 2 at "
-                        + "the '2nd-pass threshold'. The two fibre sets are merged and de-duplicated.\n"
-                        + "LOWER 2nd threshold: picks up DIM fibres that sit next to bright ones, which "
+                        + "the '2nd-pass threshold'. The two fiber sets are merged and de-duplicated.\n"
+                        + "LOWER 2nd threshold: picks up DIM fibers that sit next to bright ones, which "
                         + "pass 1 misses (a small step down adds recall; a large one over-traces).\n"
                         + "HIGHER 2nd threshold: carves thick bright bundles so their internal striations "
                         + "become traceable ridges instead of FIRE tracing across the bundle.\n"
@@ -591,7 +591,7 @@ public final class FiberAnalysisDialog {
                 Math.min(statMaxNative, defaultThreshold() * 2.0), step);
         secondThresholdSpinner.setTooltip(ttip(
                 "Background threshold for pass 2; either side of the main threshold works.\n"
-                        + "LOWER (dim fibres): start ~10% below the main threshold and watch the ① mask "
+                        + "LOWER (dim fibers): start ~10% below the main threshold and watch the ① mask "
                         + "— when background texture starts to join up, you've gone too far.\n"
                         + "HIGHER (thick bundles): raise it until a solid bright bundle breaks into its "
                         + "internal striations in the ① preview.\n"
@@ -600,22 +600,22 @@ public final class FiberAnalysisDialog {
         ridgeCheck = new CheckBox("Ridge enhancement (experimental)");
         ridgeCheck.setWrapText(true);
         ridgeCheck.setTooltip(ttip(
-                "USE CASE: thick bright bundles that trace ACROSS their width, or thin faint fibres a "
+                "USE CASE: thick bright bundles that trace ACROSS their width, or thin faint fibers a "
                         + "brightness threshold misses — ridge makes FIRE follow line-like STRUCTURE. "
-                        + "Best at moderate/high downsample; at downsample 1 (wide fibres in pixels) it "
-                        + "tends to drop fibres, so prefer Two-pass or a lower threshold there.\n"
+                        + "Best at moderate/high downsample; at downsample 1 (wide fibers in pixels) it "
+                        + "tends to drop fibers, so prefer Two-pass or a lower threshold there.\n"
                         + "EXPERIMENTAL detection mode (not a thresholding control). Replaces the image FIRE "
-                        + "traces on with a multiscale ridge/vesselness (Frangi) 'fibre-ness' map, so "
+                        + "traces on with a multiscale ridge/vesselness (Frangi) 'fiber-ness' map, so "
                         + "FIRE works on how LINE-LIKE each pixel is instead of raw brightness — lights "
-                        + "up striations inside thick bundles and goes near-zero between fibres. Runs "
+                        + "up striations inside thick bundles and goes near-zero between fibers. Runs "
                         + "server-side; restart the FIRE server after updating.\n"
                         + "IMPORTANT — this does NOT change the ① threshold mask (that is raw "
-                        + "brightness, computed here): the server AUTO-thresholds the fibre-ness map "
+                        + "brightness, computed here): the server AUTO-thresholds the fiber-ness map "
                         + "(Otsu), so the Background-threshold slider has little effect in this mode. "
-                        + "Judge results only from the traced fibres ('Show tile in viewer' / TEST-EXPORT).\n"
-                        + "The Frangi scales come from Max fibre width and are capped small, so at LOW "
-                        + "downsample (wide fibres in pixels) many fibres get a weak response and drop "
-                        + "out — ridge tends to work better at higher downsample (or on thin fibres). "
+                        + "Judge results only from the traced fibers ('Show tile in viewer' / TEST-EXPORT).\n"
+                        + "The Frangi scales come from Max fiber width and are capped small, so at LOW "
+                        + "downsample (wide fibers in pixels) many fibers get a weak response and drop "
+                        + "out — ridge tends to work better at higher downsample (or on thin fibers). "
                         + "An alternative to Two-pass for perpendicular bundles."));
         // Recompute stats + re-read the background when the collagen channel changes.
         channelBox.getSelectionModel().selectedIndexProperty().addListener((o, ov, nv) -> {
@@ -658,7 +658,7 @@ public final class FiberAnalysisDialog {
         tacsCheck.setWrapText(true);
         tacsCheck.setSelected(tacsDefault);
         tacsCheck.setTooltip(ttip(
-                "Classify each fiber by its Tumour-Associated Collagen Signature: TACS-2 (straightened "
+                "Classify each fiber by its Tumor-Associated Collagen Signature: TACS-2 (straightened "
                         + "fibers running parallel to the boundary) vs TACS-3 (fibers running perpendicular, "
                         + "radiating away). Needs a Boundary annotation (below) sitting inside the analysis "
                         + "region, with stroma around it."));
@@ -669,7 +669,7 @@ public final class FiberAnalysisDialog {
         }
         boundaryBox.setMaxWidth(Double.MAX_VALUE);
         boundaryBox.setTooltip(ttip(
-                "The tumour-stroma boundary outline (a separate annotation inside the analysis region). "
+                "The tumor-stroma boundary outline (a separate annotation inside the analysis region). "
                         + "Fibers are classified by their angle and distance relative to this outline."));
         boundaryBox.disableProperty().bind(tacsCheck.selectedProperty().not());
         double zoneDefaultUserUnit = calibrated ? 100.0 : 100.0;
@@ -684,7 +684,7 @@ public final class FiberAnalysisDialog {
         // "annotations" setting silently turns the next large run into thousands of annotations.
         detectionsCheck.setSelected(true);
         detectionsCheck.setTooltip(ttip(
-                "Recommended ON (the default every time the dialog opens). As DETECTIONS, fibres stay "
+                "Recommended ON (the default every time the dialog opens). As DETECTIONS, fibers stay "
                         + "lightweight even in the tens of thousands. As ANNOTATIONS (this box OFF) they "
                         + "become editable polylines, which is what you want for curating ground truth — "
                         + "but QuPath handles annotations far less efficiently: more than a few hundred "
@@ -745,7 +745,7 @@ public final class FiberAnalysisDialog {
         maskToObjectCheck.setTooltip(ttip(
                 "Restrict analysis to the selected object (e.g. a pixel-classifier collagen "
                         + "annotation): pixels outside it are zeroed before FIRE runs, and traced "
-                        + "fibres are clipped to its boundary (clipped remnants shorter than the Min "
+                        + "fibers are clipped to its boundary (clipped remnants shorter than the Min "
                         + "fiber length are dropped). Needs an area object selected; ignored otherwise."));
         // Enabling masking changes what FIRE sees, so refresh the preview mask when toggled.
         maskToObjectCheck.selectedProperty().addListener((o, ov, nv) -> refreshBackground());
@@ -833,12 +833,12 @@ public final class FiberAnalysisDialog {
                         + "(± this %). Human annotation is imperfect, so a band beats an exact target. "
                         + "Default ±15%."));
         maxRoundsSpinner.setTooltip(ttip(
-                "Iterative zoom: after a coarse grid, the search re-centres a finer grid on the best "
+                "Iterative zoom: after a coarse grid, the search re-centers a finer grid on the best "
                         + "detection settings and repeats, up to this many rounds (stops early once "
                         + "the best stops improving). Default 3."));
         pieceWeightBox.setTooltip(ttip(
                 "For a disjoint (multi-part) annotation: how to combine the pieces. 'Flat union' pools "
-                        + "all detected/ground-truth fibres into one total (recommended). 'Area-weighted' "
+                        + "all detected/ground-truth fibers into one total (recommended). 'Area-weighted' "
                         + "weights each piece's quality terms by its area."));
         // Smoothing belongs to stage ①: FIRE blurs the image BEFORE thresholding, so
         // the live mask must reflect it. Update the mask as it changes.
@@ -846,10 +846,12 @@ public final class FiberAnalysisDialog {
         smoothingSpinner.setTooltip(ttip(
                 "Gaussian blur (sigma_im, in analysis px at the current downsample — NOT microns) applied before "
                         + "thresholding AND tracing. Part of stage ①: the live mask reflects it.\n"
-                        + "CAUTION: raising this ADDS red to the mask (blur spreads bright collagen) "
-                        + "but also ERASES the thin ridges FIRE traces — too much and detection finds "
-                        + "NOTHING even though the mask looks full. Keep it low (0–1, up to ~2 for "
-                        + "very noisy images); if Suggest finds 0 fibers, lower this first.\n"
+                        + "HIGHER = the violet mask spreads (blur widens bright collagen) and thin "
+                        + "neighboring fibers merge into one ridge; LOWER = finer ridges but more noise. "
+                        + "Keep it low (0–1, up to ~2 for very noisy images).\n"
+                        + "CT-FIRE dims the image when it smooths; the server lowers the threshold it "
+                        + "sends to match, so FIRE keeps the pixels the mask shows (to within a few "
+                        + "gray levels at Smoothing 2–3).\n"
                         + "FIRE tracer only: Centerline and Flow trace the unblurred image, so this has "
                         + "no effect on them (the live mask still shows the blur)."));
         distSmoothSpinner.setTooltip(ttip(
@@ -920,7 +922,7 @@ public final class FiberAnalysisDialog {
                         + ". Raise to drop noise specks/fragments; lower to keep short fibers."));
         seedSpacingSpinner.setTooltip(ttip(
                 "FIRE tracer only: Centerline does not seed, and Flow seeds every third of the "
-                        + "'Parallel fibre distance', so this has no effect on them.\n"
+                        + "'Parallel fiber distance', so this has no effect on them.\n"
                         + "IMPACT ON RESULTS: LOWER = more fibers detected and traces follow CURVES closely; "
                         + "HIGHER = fibers are MISSED entirely and curves flatten into straight chords "
                         + "that can cut across gaps. (Example: on one tile, 58→8 tripled the fibers "
@@ -940,9 +942,9 @@ public final class FiberAnalysisDialog {
                         + "for ~500 px images, so full-res whole slides need a higher value here. "
                         + "Preview and the committed result both use this value."));
         tacsZoneSpinner.setTooltip(ttip(
-                "Fibers whose centre is within this distance of the boundary are TACS-classified; "
+                "Fibers whose center is within this distance of the boundary are TACS-classified; "
                         + "those farther away are left unclassified (" + "microns (full-resolution pixels on an uncalibrated image)"
-                        + "). Widen to include more stroma; narrow to focus on the peri-tumoural rim."));
+                        + "). Widen to include more stroma; narrow to focus on the peri-tumoral rim."));
 
         // ===================================================================
         // Stage ① — Thresholding (what FIRE sees). All LIVE: changing any of
@@ -995,7 +997,7 @@ public final class FiberAnalysisDialog {
         Button showThreshTileBtn = new Button("Show tile in viewer");
         showThreshTileBtn.setTooltip(ttip(
                 "Show the THRESHOLD mask for the selected tile on the actual image at full resolution "
-                        + "— instant, no fibre detection. When 'Two-pass' is on this previews the "
+                        + "— instant, no fiber detection. When 'Two-pass' is on this previews the "
                         + "2ND-PASS threshold (the ① mask above already shows the main one), so you can "
                         + "raise it until a thick bundle breaks into its internal striations. "
                         + "Double-click a tile in the mask above to pick it; 'Clear overlay' "
@@ -1024,13 +1026,13 @@ public final class FiberAnalysisDialog {
         maskTileLabel.setStyle("-fx-font-size: 11; -fx-font-weight: bold;");
         Button exportTileBtn = new Button("Export tile…");
         exportTileBtn.setTooltip(ttip(
-                "Save the EXACT pixels of the selected tile (the prescaled gray image FIRE analyses) "
+                "Save the EXACT pixels of the selected tile (the prescaled gray image FIRE analyzes) "
                         + "as a PNG. The filename includes its x,y position in the image — useful for "
                         + "reproducing a crash or sharing a problem region."));
         exportTileBtn.setOnAction(e -> exportTile());
         Button viewTileBtn = new Button("Show tile in viewer");
         viewTileBtn.setTooltip(ttip(
-                "Detect the selected tile and show its fibres on the ACTUAL image in the QuPath "
+                "Detect the selected tile and show its fibers on the ACTUAL image in the QuPath "
                         + "viewer, zoomed to that tile — full resolution, native zoom/pan, so you can "
                         + "actually judge the collagen. 'Clear overlay' clears the overlay. "
                         + "(The image must be open in the active viewer.)"));
@@ -1040,9 +1042,9 @@ public final class FiberAnalysisDialog {
         thicknessWidthCheck.setWrapText(true);
         thicknessWidthCheck.setTooltip(ttip(
                 "In the 'Show tile in viewer' overlay (and the live 'Apply to chosen area' preview), draw each "
-                        + "fibre at its ESTIMATED thickness — twice FIRE's distance-map radius at the "
-                        + "fibre's vertices — instead of a constant thin line. Thick collagen bundles then "
-                        + "render as thick lines and fine fibres as thin ones; zoom in to see it. Purely a "
+                        + "fiber at its ESTIMATED thickness — twice FIRE's distance-map radius at the "
+                        + "fiber's vertices — instead of a constant thin line. Thick collagen bundles then "
+                        + "render as thick lines and fine fibers as thin ones; zoom in to see it. Purely a "
                         + "display option — it does not change detection or the saved objects."));
         thicknessWidthCheck.selectedProperty().addListener((o, ov, nv) -> {
             FiberPreviewOverlay lo = liveOverlay;
@@ -1104,13 +1106,13 @@ public final class FiberAnalysisDialog {
         tracerCombo.getItems().addAll(TRACER_FIRE, TRACER_CENTERLINE, TRACER_FLOW);
         flowParallelSpinner = spinnerD(0.5, 50.0, 3.0, 0.5);
         flowParallelSpinner.setTooltip(ttip(
-                "Flow tracer only. The minimum sideways spacing between traced fibres running "
-                + "through the SAME bundle. A thick bundle really does contain many fibres, so "
+                "Flow tracer only. The minimum sideways spacing between traced fibers running "
+                + "through the SAME bundle. A thick bundle really does contain many fibers, so "
                 + "tracing dozens through one is not an error \u2014 but it would also sink QuPath, "
-                + "so this sets how densely the bundle is sampled. LOWER traces more fibres per "
-                + "bundle (3 \u00b5m \u2248 1300 fibres on a dense tile, 1 \u00b5m \u2248 4300); "
-                + "HIGHER traces fewer, longer-spaced ones. NOTE fibre COUNT and DENSITY scale with "
-                + "this, so they sample the bundle rather than measure it; per-fibre length, angle "
+                + "so this sets how densely the bundle is sampled. LOWER traces more fibers per "
+                + "bundle (3 \u00b5m \u2248 1300 fibers on a dense tile, 1 \u00b5m \u2248 4300); "
+                + "HIGHER traces fewer, longer-spaced ones. NOTE fiber COUNT and DENSITY scale with "
+                + "this, so they sample the bundle rather than measure it; per-fiber length, angle "
                 + "and waviness are unaffected."));
         tracerCombo.setValue(TRACER_FIRE);
         tracerCombo.setMaxWidth(Double.MAX_VALUE);
@@ -1123,7 +1125,7 @@ public final class FiberAnalysisDialog {
                 + "make radial 'star' artifacts. Better for waviness measurements; NOT the CT-FIRE "
                 + "algorithm, so numbers are not directly comparable to CT-FIRE literature.\n\n"
                 + "Flow (orientation field) — follows the local fiber direction through the thresholded "
-                + "collagen and keeps the longest traces, spaced by the 'Parallel fibre distance'. Also "
+                + "collagen and keeps the longest traces, spaced by the 'Parallel fiber distance'. Also "
                 + "NOT the CT-FIRE algorithm.\n\n"
                 + "Centerline and Flow use the Background threshold and Min fiber length; the FIRE "
                 + "settings (Smoothing, Seed spacing, Seed sensitivity, the link, bend and extend "
@@ -1133,7 +1135,7 @@ public final class FiberAnalysisDialog {
         rememberCombo(tracerCombo, FiberSocketPreferences.tracerProperty());
         rememberPerUnit(flowParallelSpinner, FiberSocketPreferences.flowParallelProperty());
         t2.addRow(r2++, lbl("Tracer"), tracerCombo);
-        javafx.scene.control.Label flowParLbl = unitLbl("Parallel fibre distance (%s)");
+        javafx.scene.control.Label flowParLbl = unitLbl("Parallel fiber distance (%s)");
         t2.addRow(r2++, flowParLbl, flowParallelSpinner);
         // Only meaningful for the flow tracer; grey it out otherwise rather than hide it, so the
         // control does not jump around when the tracer changes.
@@ -1157,7 +1159,7 @@ public final class FiberAnalysisDialog {
         presetCombo.setTooltip(ttip("Preset starting points for tracing. Picking one changes SEVERAL "
                 + "settings below at once (Direction decay, Max bend angle, Seed spacing), then you can "
                 + "fine-tune. 'Custom' leaves everything as-is; editing any of those settings switches "
-                + "back to 'Custom'. Straight = clean straight fibres; Wavy = follows crimp (denser "
+                + "back to 'Custom'. Straight = clean straight fibers; Wavy = follows crimp (denser "
                 + "seeding, more curvature — pair with the flow filter to keep it clean)."));
         Label presetWarn = new Label("⚠ Selecting a preset changes several settings below.");
         presetWarn.setWrapText(true);
@@ -1233,7 +1235,7 @@ public final class FiberAnalysisDialog {
         webCapSpinner = spinnerD(0.0, 2000000.0, 200000.0, 25000.0);
         parallelTilesSpinner = spinnerD(1.0, 16.0, 1.0, 1.0);
         parallelTilesSpinner.setTooltip(ttip(
-                "How many tiles to trace AT ONCE. 1 keeps the present behaviour: one tile at a time."
+                "How many tiles to trace AT ONCE. 1 keeps the present behavior: one tile at a time."
                 + "\n\nHIGHER is faster up to a point and then slower \u2014 the tracer is limited by "
                 + "memory bandwidth, not by cores, so extra workers start starving each other. "
                 + "Measured on a 16-core machine: 2 tiles 1.3x, 4 tiles 1.5x, 6 tiles 1.9x, 8 tiles "
@@ -1243,13 +1245,13 @@ public final class FiberAnalysisDialog {
                 + "\n\nEach extra worker is a separate Python process on the server, so memory use "
                 + "rises with it. Results are unchanged: tiles are independent and are collected in "
                 + "order."));
-        antiFlowCheck = new CheckBox("Anti-flow check (adds a per-fibre score)");
+        antiFlowCheck = new CheckBox("Anti-flow check (adds a per-fiber score)");
         antiFlowCheck.setWrapText(true);
         antiFlowCheck.setTooltip(ttip(
-                "Score every fibre against an INDEPENDENT estimate of the local collagen direction "
-                + "and add it as an \"Anti-flow (deg)\" measurement: ~0 means the fibre runs along "
+                "Score every fiber against an INDEPENDENT estimate of the local collagen direction "
+                + "and add it as an \"Anti-flow (deg)\" measurement: ~0 means the fiber runs along "
                 + "the collagen, toward 90 means across it. Nothing is removed \u2014 sort by this "
-                + "column to review the fibres the pipeline is least sure about. Independent because "
+                + "column to review the fibers the pipeline is least sure about. Independent because "
                 + "it uses a different operator from the one the tracer followed; checking a tracer "
                 + "against its own field only ever agrees with it, which is how a boundary artifact "
                 + "went unnoticed. Costs a second pass over each tile."));
@@ -1257,27 +1259,27 @@ public final class FiberAnalysisDialog {
         splitJumpMultSpinner = spinnerD(1.5, 20.0, 4.0, 0.5);
         splitGapFracSpinner = spinnerD(0.1, 0.9, 0.4, 0.05);
         edgeTrimSpinner = spinnerD(0.0, 20.0, 3.0, 1.0);
-        flowFilterCheck = new CheckBox("Remove cross-flow fibres");
+        flowFilterCheck = new CheckBox("Remove cross-flow fibers");
         flowFilterCheck.setSelected(true);
         flowFilterCheck.setTooltip(ttip("Flow filter. Where the collagen is strongly oriented, a real "
-                + "fibre runs ALONG the flow; this removes fibres that run ACROSS it (wide-bundle crossers, "
-                + "asterisk spokes, perpendicular crossbars) regardless of length. A WAVY fibre follows its "
+                + "fiber runs ALONG the flow; this removes fibers that run ACROSS it (wide-bundle crossers, "
+                + "asterisk spokes, perpendicular crossbars) regardless of length. A WAVY fiber follows its "
                 + "local curving flow, so it is KEPT. Use the coherence gate below to control how strongly "
                 + "oriented the tissue must be before this acts."));
         flowCohSpinner = spinnerD(0.35, 0.85, 0.55, 0.05);
         flowCohSpinner.setTooltip(ttip("Flow filter safety dial (structure-tensor coherence). Only act "
                 + "where local orientation is at least this strong. HIGHER = only very aligned bundles are "
                 + "cleaned, mixed/random tissue is left alone (safer, keeps more). LOWER = cleans more "
-                + "aggressively but may cut real fibres in weakly-oriented tissue. Default 0.55."));
+                + "aggressively but may cut real fibers in weakly-oriented tissue. Default 0.55."));
         densityCapSpinner.setTooltip(ttip("Density guard: if more than this % of a tile is above the "
                 + "threshold, the server raises the threshold BEFORE tracing to avoid a dense-tile "
-                + "crash — but that DROPS fibres on dense collagen (they fall below the raised "
+                + "crash — but that DROPS fibers on dense collagen (they fall below the raised "
                 + "threshold). RAISE this for collagen-heavy samples so all of it is traced (worker "
                 + "isolation contains any crash — the tile is skipped, the server survives); LOWER it "
                 + "only if the server is crashing. Default 35%."));
         seedCapSpinner.setTooltip(ttip("Seed-count guard: if a tile would seed more than this many "
                 + "nucleation points, the server raises Seed spacing before tracing so the extension "
-                + "step stays tractable — but that COARSENS dense tiles (fewer/straighter fibres, and it "
+                + "step stays tractable — but that COARSENS dense tiles (fewer/straighter fibers, and it "
                 + "undoes the Wavy preset's dense seeding). RAISE it for dense/crimped collagen; LOWER "
                 + "only if dense tiles hang. Default 15000."));
         webCapSpinner.setTooltip(ttip("Connected-web guard: when a tile's collagen forms ONE "
@@ -1287,19 +1289,19 @@ public final class FiberAnalysisDialog {
                 + "The server raises the threshold BEFORE tracing until the web breaks apart. Tiles that "
                 + "trace normally measure 8k–105k here; tiles that time out measure 340k+. RAISE it to "
                 + "intervene less (and risk timeouts); LOWER it to intervene sooner, at the cost of "
-                + "dropping fibres below the raised threshold. 0 disables. Default 200000. Note the "
+                + "dropping fibers below the raised threshold. 0 disables. Default 200000. Note the "
                 + "Centerline tracer has no linking step, so this guard never applies to it."));
         fireTimeoutSpinner.setTooltip(ttip("Per-tile FIRE time limit (seconds). A tile that exceeds it "
                 + "is skipped (the worker respawns, the server stays up). Default 180."));
-        splitJumpMultSpinner.setTooltip(ttip("Jump-cut sensitivity: a fibre edge longer than this "
-                + "multiple of the fibre's median step is cut as a spurious jump. Lower = cuts more "
+        splitJumpMultSpinner.setTooltip(ttip("Jump-cut sensitivity: a fiber edge longer than this "
+                + "multiple of the fiber's median step is cut as a spurious jump. Lower = cuts more "
                 + "aggressively. Default 4."));
         splitGapFracSpinner.setTooltip(ttip("Jump-cut over background: an edge is cut when at least "
                 + "this fraction of it lies below threshold. Lower = cuts more readily. Default 0.4."));
-        edgeTrimSpinner.setTooltip(ttip("Tile-seam cleanup. The image is analysed one tile at a time. "
-                + "Where a real fibre is cut by a tile's edge, the tracer often adds a short false segment "
-                + "that runs straight ALONG that cut (a stub square to the true fibre). This removes any "
-                + "fibre segment lying within N pixels of a tile edge; the rest of the fibre is kept. "
+        edgeTrimSpinner.setTooltip(ttip("Tile-seam cleanup. The image is analyzed one tile at a time. "
+                + "Where a real fiber is cut by a tile's edge, the tracer often adds a short false segment "
+                + "that runs straight ALONG that cut (a stub square to the true fiber). This removes any "
+                + "fiber segment lying within N pixels of a tile edge; the rest of the fiber is kept. "
                 + "0 = off. Default 3."));
         GridPane srv = new GridPane();
         srv.setHgap(10);
@@ -1318,7 +1320,7 @@ public final class FiberAnalysisDialog {
                 + "guard, no dense-tile retry, no ridge pre-filter, no bridge-split, no tile-seam trim, no "
                 + "cross-bar removal. Only tme-quant's own steps stay (min length, max width) plus the "
                 + "transport basics (16-bit prescale, square-padding for the FIRE stride bug). If a tile "
-                + "crashes or times out it simply yields NO fibres for that tile (no retry, nothing "
+                + "crashes or times out it simply yields NO fibers for that tile (no retry, nothing "
                 + "changed). Use this to reproduce/validate what a specific tile does in raw FIRE. The "
                 + "settings below have NO effect while this is on."));
         int sr = 0;
@@ -1411,7 +1413,7 @@ public final class FiberAnalysisDialog {
 
         Label hint = new Label(
                 "Region = bounding box of your selection. For TACS, select a LARGER region, "
-                        + "then pick the tumour annotation (inside it) as the boundary.");
+                        + "then pick the tumor annotation (inside it) as the boundary.");
         hint.setWrapText(true);
         hint.setStyle("-fx-font-size: 11;");
 
@@ -1464,10 +1466,10 @@ public final class FiberAnalysisDialog {
         Button testExportBtn = new Button("FULL TEST-EXPORT (tile)");
         testExportBtn.setTooltip(ttip(
                 "DEBUG: run FIRE on the currently selected tile and dump every stage we can reach into "
-                + "<project>/test/export_tile#_<datetime>/ — the exact grey image FIRE received, its "
-                + "threshold mask (missed fibres show here first), the distance map that drives the "
-                + "tracer's jumps, the traced-fibre overlay, plus params.json and a fibres CSV/JSON. "
-                + "Needs a project. For diagnosing missed fibres / stray jumps on one tile."));
+                + "<project>/test/export_tile#_<datetime>/ — the exact gray image FIRE received, its "
+                + "threshold mask (missed fibers show here first), the distance map that drives the "
+                + "tracer's jumps, the traced-fiber overlay, plus params.json and a fibers CSV/JSON. "
+                + "Needs a project. For diagnosing missed fibers / stray jumps on one tile."));
         testExportBtn.setOnAction(e -> runFullTestExport());
         HBox suggestRow = new HBox(8, calibBtn, suggestBtn, projectTuneBtn);
         suggestRow.setAlignment(Pos.CENTER_LEFT);
@@ -3022,7 +3024,7 @@ public final class FiberAnalysisDialog {
         }
         if (flowParallelSpinner != null && tracerCombo != null
                 && TRACER_FLOW.equals(tracerCombo.getValue())) {
-            sb.append("   Parallel fibre distance: ")
+            sb.append("   Parallel fiber distance: ")
               .append(trimNum(flowParallelSpinner.getValue())).append(" ").append(unitLabel());
         }
         sb.append("\nTwo-pass: ").append(twoPassCheck != null && twoPassCheck.isSelected());
@@ -3187,7 +3189,7 @@ public final class FiberAnalysisDialog {
             try {
                 if (!guardHeavyRun(channel, downsample,
                         wholeRegion ? "Whole-region preview" : "Tile preview", wholeRegion)) {
-                    setBusy(false, "Cancelled — settings unchanged.");
+                    setBusy(false, "Canceled — settings unchanged.");
                     return;
                 }
                 AnalyzeResult res = wholeRegion
@@ -3304,7 +3306,7 @@ public final class FiberAnalysisDialog {
         if (traced <= 0 && res.failedTiles > 0) {
             int total = Math.max(res.failedTiles, res.tiles);
             sb.append(String.format(
-                    " %d of %d tile(s) FAILED — too many fibres for FIRE's linking step (not empty). "
+                    " %d of %d tile(s) FAILED — too many fibers for FIRE's linking step (not empty). "
                     + "Lower 'Max tile size' in Preferences, raise 'Seed spacing', or enable 'Ridge "
                     + "enhancement'. In a full run a failed tile is skipped and the rest still process.",
                     res.failedTiles, total));
@@ -3347,7 +3349,7 @@ public final class FiberAnalysisDialog {
                     + "or Seed spacing for cleaner results).", res.autoRaisedTiles));
         }
         if (res.failedTiles > 0) {
-            sb.append(String.format(" %d tile(s) too dense to analyse — raise Background threshold "
+            sb.append(String.format(" %d tile(s) too dense to analyze — raise Background threshold "
                     + "/ Seed spacing / Downsample.", res.failedTiles));
         }
         return sb.toString();
@@ -3445,7 +3447,7 @@ public final class FiberAnalysisDialog {
         }
         if (pieceRois.size() > 16 || maxPiecePx > 1200L * 1200) {
             Dialogs.showErrorMessage(SUGGEST_TITLE, String.format(
-                    "Tuning region is too large: %d piece(s), largest ~%d analysed px. Pick a "
+                    "Tuning region is too large: %d piece(s), largest ~%d analyzed px. Pick a "
                     + "smaller representative region (ideally one area ≤ ~1000×1000 px).",
                     pieceRois.size(), maxPiecePx));
             return;
@@ -3502,8 +3504,8 @@ public final class FiberAnalysisDialog {
                         // while erasing the thin ridges FIRE seeds on.
                         String hint = smoothingSpinner.getValue() >= 2.5
                                 ? "Smoothing is high (" + round1(smoothingSpinner.getValue())
-                                  + "): it thickens the red mask but erases the thin ridges FIRE "
-                                  + "traces. Lower Smoothing to ~1 and re-run. "
+                                  + "): it thickens the violet mask and merges the thin ridges "
+                                  + "FIRE traces. Lower Smoothing to ~1 and re-run. "
                                 : "Check the Background threshold isn't excluding real fibers, and "
                                   + "try a smaller Downsample. ";
                         setBusy(false, "Suggest: 0 fibers for EVERY setting — this is an ① setting, "
@@ -3518,7 +3520,7 @@ public final class FiberAnalysisDialog {
                         return;
                     }
                     String warn = (supervised && nGt < 8)
-                            ? String.format(" Only %d ground-truth fibre%s — count target is noisy; "
+                            ? String.format(" Only %d ground-truth fiber%s — count target is noisy; "
                                     + "annotate more for a reliable result.", nGt, nGt == 1 ? "" : "s")
                             : "";
                     setBusy(false, String.format(
@@ -3821,7 +3823,7 @@ public final class FiberAnalysisDialog {
                     });
                     return;
                 }
-                prog.done(s2, pieces.size() + " region(s), " + totalGt + " traced fibre(s)");
+                prog.done(s2, pieces.size() + " region(s), " + totalGt + " traced fiber(s)");
 
                 final boolean supervised = totalGt > 0;
                 int s3 = prog.addStep("Searching parameters", "Two-stage FIRE grid search matched to "
@@ -3942,7 +3944,7 @@ public final class FiberAnalysisDialog {
             Dialogs.showErrorMessage(TITLE, "Exclusion regions apply to one image only: they are "
                     + "loaded for the image this dialog is open on, so the other " + (entries.size() - 1)
                     + " image(s) would be masked with the wrong regions.\n\n"
-                    + "Either untick 'Exclude regions from fibre tracing', or run the images one at "
+                    + "Either untick 'Exclude regions from fiber tracing', or run the images one at "
                     + "a time, each with its own exclusion regions.");
             runBtn.setDisable(false);
             return;
@@ -4040,14 +4042,14 @@ public final class FiberAnalysisDialog {
                             noneF > 0 ? String.format("%n%d image(s) have none and will be skipped.",
                                     noneF) : "");
                     if (!confirmOnFx("Batch targets", confirmMsg)) {
-                        runLog.line("Batch cancelled by user at the target check.");
+                        runLog.line("Batch canceled by user at the target check.");
                         return; // finally restores
                     }
                 }
                 // Whole-batch progress line (top of the list): total analysis tiles across ALL
                 // images/regions, so the ETA reflects the entire workflow, not one image.
                 final int overall = prog.addStep("Overall progress",
-                        "Fibre-detection tiles across ALL selected images/regions.");
+                        "Fiber-detection tiles across ALL selected images/regions.");
                 prog.running(overall, "counting tiles…");
                 int s1 = prog.addStep("Collecting image statistics", "One consistent intensity scale "
                         + "across ALL selected images (no per-image normalization).");
@@ -4062,10 +4064,10 @@ public final class FiberAnalysisDialog {
                 // total tile count. No density/resolution warnings (those are the working settings).
                 if (totalTiles > 800) {
                     if (!confirmOnFx("Long batch — proceed?", String.format(
-                            "This batch will process %,d fibre-detection tiles across %d image(s) — "
+                            "This batch will process %,d fiber-detection tiles across %d image(s) — "
                             + "expect a long, unattended run.%n%nProceed?",
                             totalTiles, entries.size()))) {
-                        runLog.line("Batch cancelled by user at the long-run check.");
+                        runLog.line("Batch canceled by user at the long-run check.");
                         return; // finally restores
                     }
                 }
@@ -4160,7 +4162,7 @@ public final class FiberAnalysisDialog {
                         imagesDone++;
                         prog.done(si, objects.size() + " fibers"
                                 + (removed > 0 ? " (" + removed + " prior removed)" : ""));
-                        runLog.line(nm + ": DONE — " + objects.size() + " fibre(s)"
+                        runLog.line(nm + ": DONE — " + objects.size() + " fiber(s)"
                                 + (removed > 0 ? " (" + removed + " prior removed)" : ""));
                     } catch (BatchCancelled stop) {
                         // A stop is not a failure of this image -- mark it and leave the loop.
@@ -4185,12 +4187,12 @@ public final class FiberAnalysisDialog {
                 final int fc = totalFibers, ic = imagesDone, n = entries.size();
                 final boolean stopped = batchCancel.get();
                 runLog.line((stopped ? "BATCH STOPPED: " : "BATCH DONE: ") + ic + " / " + n
-                        + " image(s), " + fc + " fibre(s) written");
+                        + " image(s), " + fc + " fiber(s) written");
                 Platform.runLater(() -> {
                     // The notification is transient; if the user looked away it is gone. Put the
                     // same result on the dialog, where it stays until the next run.
                     summary.setText((stopped ? "Stopped. " : "Finished. ") + ic + " / " + n
-                            + " image(s), " + fc + " fibre(s) written."
+                            + " image(s), " + fc + " fiber(s) written."
                             + (logDir != null ? "  Log: fiber-run-" + logStamp + "-client.txt" : ""));
                     summary.setVisible(true);
                     Dialogs.showInfoNotification(TITLE, ic + " / " + n
@@ -4250,12 +4252,12 @@ public final class FiberAnalysisDialog {
         CheckBox asDet = new CheckBox("Create detections (not annotations)");
         asDet.setSelected(true);  // batch runs whole images: annotations here almost always overload QuPath
         asDet.setTooltip(ttip("Strongly recommended ON for batch runs. Whole-image runs typically produce "
-                + "thousands of fibres per image; as ANNOTATIONS more than ~" + ANNOTATION_WARN_COUNT
+                + "thousands of fibers per image; as ANNOTATIONS more than ~" + ANNOTATION_WARN_COUNT
                 + " per image can make QuPath very slow or crash it. Detections keep every measurement."));
         CheckBox maskCb = new CheckBox("Restrict to each annotation (mask + clip)");
         maskCb.setSelected(maskToObjectCheck.isSelected());
         maskCb.setTooltip(ttip("Zero pixels outside each target annotation before FIRE, and "
-                + "clip fibres to it. Requires an annotation region mode (by class, or any)."));
+                + "clip fibers to it. Requires an annotation region mode (by class, or any)."));
         StepProgress prog = new StepProgress();
         Button run = new Button("Run analysis");
         run.setDefaultButton(true);
@@ -4265,7 +4267,7 @@ public final class FiberAnalysisDialog {
         Button stop = new Button("Stop");
         stop.setDisable(true);
         stop.setTooltip(ttip("Stop after the current tile. Images already finished keep their "
-                + "fibres — they were saved as each image completed — and the image that was "
+                + "fibers — they were saved as each image completed — and the image that was "
                 + "part-way through is left untouched."));
         Button closeBatch = new Button("Close");
         closeBatch.setTooltip(ttip("Close this window. A run already under way keeps going; "
@@ -4312,8 +4314,8 @@ public final class FiberAnalysisDialog {
                 return;
             }
             if (!asDet.isSelected() && !Dialogs.showConfirmDialog(TITLE,
-                    "Create fibres as ANNOTATIONS for " + entries.size() + " image(s)?\n\n"
-                            + "Batch runs usually produce thousands of fibres per image. More than ~"
+                    "Create fibers as ANNOTATIONS for " + entries.size() + " image(s)?\n\n"
+                            + "Batch runs usually produce thousands of fibers per image. More than ~"
                             + ANNOTATION_WARN_COUNT + " annotations can make QuPath very slow or crash "
                             + "it. Detections keep the same measurements.\n\n"
                             + "OK = annotations anyway, Cancel = go back.")) {
@@ -5180,7 +5182,7 @@ public final class FiberAnalysisDialog {
                 }
             }
             neverMsg = never.isEmpty()
-                    ? String.format(" Every traced fibre (%d) was detected by at least one setting. ✓",
+                    ? String.format(" Every traced fiber (%d) was detected by at least one setting. ✓",
                             totalGt)
                     : String.format(" Never detected by ANY setting (%d of %d): %s.",
                             never.size(), totalGt, gtLabels(allGt, never, 30));
@@ -5198,13 +5200,13 @@ public final class FiberAnalysisDialog {
 
         String noteText;
         if (supervised && totalGt > 0 && haveCoverage) {
-            noteText = "Scored to match your annotated fibre COUNT. Selecting a row loads its "
-                    + "parameters here (mask updates live); 'Apply Selected and Preview' traces its fibres. "
-                    + "The 'Other settings' below the top picks each catch fibres the top scores "
+            noteText = "Scored to match your annotated fiber COUNT. Selecting a row loads its "
+                    + "parameters here (mask updates live); 'Apply Selected and Preview' traces its fibers. "
+                    + "The 'Other settings' below the top picks each catch fibers the top scores "
                     + "miss." + neverMsg;
         } else if (supervised) {
-            noteText = "Scored to match your annotated fibre COUNT. Selecting a row loads its "
-                    + "parameters here; 'Apply Selected and Preview' traces its fibres. (The per-fibre "
+            noteText = "Scored to match your annotated fiber COUNT. Selecting a row loads its "
+                    + "parameters here; 'Apply Selected and Preview' traces its fibers. (The per-fiber "
                     + "coverage breakdown needs the updated fiber server.)";
         } else {
             noteText = "No line annotations found — scored by foreground coverage + median "
@@ -5218,7 +5220,7 @@ public final class FiberAnalysisDialog {
 
         Button preview = new Button("Apply Selected and Preview  ▶");
         preview.setDefaultButton(true);
-        preview.setTooltip(ttip("Load the selected row's parameters and trace fibres for "
+        preview.setTooltip(ttip("Load the selected row's parameters and trace fibers for "
                 + "it on the current preview tile/region, so you can see the result."));
         preview.setOnAction(e -> {
             Object sel = group.getSelectedToggle() == null ? null
@@ -5436,12 +5438,12 @@ public final class FiberAnalysisDialog {
         AnalyzeResult b;
         try {
             status.accept(String.format("Two-pass 2/2 — %s threshold %s…",
-                    t2 < t1 ? "lower (dim fibres)" : "higher (thick bundles)", trimNum(t2)));
+                    t2 < t1 ? "lower (dim fibers)" : "higher (thick bundles)", trimNum(t2)));
             b = analyzeFull(channel, d, false, null, extra, status, tileSink);
         } finally {
             thresholdOverrideNative = null;
         }
-        status.accept(String.format("Merging passes (%d + %d fibres)…",
+        status.accept(String.format("Merging passes (%d + %d fibers)…",
                 a.fibers.size(), b.fibers.size()));
         List<FiberSocketClient.Fiber> union = new ArrayList<>(a.fibers);
         union.addAll(b.fibers);
@@ -5486,7 +5488,7 @@ public final class FiberAnalysisDialog {
         List<Tile> tiles = computeTiles(rwA, rhA, d);
         String detMeta = buildMeta(d, false, extra); // detection never sends a mask
         logger.info("Analyze WHOLE region: ch={} downsample={} threshold={}(im2={}) region={}x{}@({},{}) "
-                + "-> {} analysed px -> {} tile(s), tacs={}",
+                + "-> {} analyzed px -> {} tile(s), tacs={}",
                 channel, d, thresholdSpinner.getValue(), serverThreshIm2(), rw, rh, rx, ry,
                 rwA + "x" + rhA, tiles.size(), tacs);
         FiberSocketClient client = new FiberSocketClient(
@@ -5630,7 +5632,7 @@ public final class FiberAnalysisDialog {
         boolean needPost = tiles.size() > 1 || tacs;
         if (needPost && !all.isEmpty()) {
             final String stitchBase = tacs ? "Stitching seams + classifying TACS" : "Stitching seams";
-            status.accept(stitchBase + "… assembling " + all.size() + " fibres.");
+            status.accept(stitchBase + "… assembling " + all.size() + " fibers.");
             finalFibers = postprocessAssembled(client, all, d, tacs, tiles.size() > 1, boundary,
                     rwA, rhA, status, stitchBase);
             logger.info("Post-process: {} raw -> {} fibers (stitch={}, tacs={})",
@@ -5641,7 +5643,7 @@ public final class FiberAnalysisDialog {
             }
         }
         if (failedTiles > 0) {
-            logger.warn("{} of {} tiles were too dense to analyse even after auto-coarsening seeds.",
+            logger.warn("{} of {} tiles were too dense to analyze even after auto-coarsening seeds.",
                     failedTiles, tiles.size());
         }
         AnalyzeResult ar = new AnalyzeResult(finalFibers, backend[0], tiles.size());
@@ -5748,14 +5750,14 @@ public final class FiberAnalysisDialog {
         for (int i = 0, c = 1; i < fibers.size(); i += step, c++) {
             List<FiberSocketClient.Fiber> part =
                     fibers.subList(i, Math.min(fibers.size(), i + step));
-            status.accept(String.format("Classifying TACS — chunk %d/%d (%d fibres)…",
+            status.accept(String.format("Classifying TACS — chunk %d/%d (%d fibers)…",
                     c, chunks, part.size()));
             FiberSocketClient.AnalyzeResponse pr =
                     client.postprocess(buildPostMeta(part, d, true, false), mask);
             if (pr != null && pr.ok && pr.fibers != null) {
                 out.addAll(pr.fibers);
             } else {
-                logger.warn("TACS chunk {}/{} failed ({}); those fibres left unclassified",
+                logger.warn("TACS chunk {}/{} failed ({}); those fibers left unclassified",
                         c, chunks, pr == null ? "no response" : pr.error);
                 out.addAll(part);
             }
@@ -5881,7 +5883,7 @@ public final class FiberAnalysisDialog {
                         }
                     }
                 } catch (Exception cex) {
-                    logger.warn("Test-export: client-side grey/mask save failed: {}", cex.getMessage());
+                    logger.warn("Test-export: client-side gray/mask save failed: {}", cex.getMessage());
                 }
                 // Now the server run (this is the step that can crash on a dense tile).
                 FiberSocketClient.AnalyzeResponse resp = null;
@@ -6004,14 +6006,14 @@ public final class FiberAnalysisDialog {
             }
         }
         sb.append("\nFiles:\n")
-          .append("  00_gray_client.png    - the grey tile the CLIENT sent (saved BEFORE FIRE runs, so it\n")
+          .append("  00_gray_client.png    - the gray tile the CLIENT sent (saved BEFORE FIRE runs, so it\n")
           .append("                          survives even if the server crashes on this tile)\n")
-          .append("  00_threshold_mask_client.png - client-side threshold mask of that grey\n")
-          .append("  01_gray_asFIRE.png    - the EXACT grey image FIRE received (prescale, + ridge if on)\n")
-          .append("  02_threshold_mask.png - foreground FIRE keeps (grey > server threshold). A fibre MISSING here is below threshold.\n")
+          .append("  00_threshold_mask_client.png - client-side threshold mask of that gray\n")
+          .append("  01_gray_asFIRE.png    - the EXACT gray image FIRE received (prescale, + ridge if on)\n")
+          .append("  02_threshold_mask.png - foreground FIRE keeps (gray > server threshold). A fiber MISSING here is below threshold.\n")
           .append("  03_distance_map.png   - cityblock distance to background; the tracer walks THIS and its jump/search radius equals the value here (bright = long jumps possible)\n")
-          .append("  04_fibers_overlay.png - traced fibres (green) on the grey\n")
-          .append("  05_fibers.csv/.json   - per-fibre geometry + width stats\n")
+          .append("  04_fibers_overlay.png - traced fibers (green) on the gray\n")
+          .append("  05_fibers.csv/.json   - per-fiber geometry + width stats\n")
           .append("  params.json           - the exact ANALYZE meta sent to FIRE\n");
         return sb.toString();
     }
@@ -6585,7 +6587,7 @@ public final class FiberAnalysisDialog {
             maskTileLabel.setText(String.format(
                     "%d tiles — double-click to pick a tile (tile %d selected). %s 'Export tile' saves it.",
                     tiles.size(), sel + 1,
-                    oneTile ? "'Preview fibers' analyses it;" : "'Whole region' previews all;"));
+                    oneTile ? "'Preview fibers' analyzes it;" : "'Whole region' previews all;"));
         }
     }
 
@@ -7100,7 +7102,7 @@ public final class FiberAnalysisDialog {
                 "Image: " + logImgName,
                 "Region (full-res px): x=" + rx + " y=" + ry + " w=" + rw + " h=" + rh,
                 "Downsample: " + downsample + "   Max tile size (px): " + maxTileDim(),
-                "Min fibre length: " + minLenSpinner.getValue() + " " + unitLabel()
+                "Min fiber length: " + minLenSpinner.getValue() + " " + unitLabel()
                         + "   Seed spacing: " + seedSpacingSpinner.getValue() + " " + unitLabel(),
                 "Output: " + (detectionsCheck.isSelected() ? "detections" : "annotations")
                         + (runRestrictRoi != null ? "   Restrict-to-object: ON" : "")
@@ -7146,7 +7148,7 @@ public final class FiberAnalysisDialog {
         }
         final FiberPreviewOverlay overlay = liveOverlay;
         final TileSink liveSink = canReuse ? null : (idx, total, coreFibers, tile) -> {
-            runLog.line("tile " + (idx + 1) + "/" + total + ": +" + coreFibers.size() + " fibre(s)");
+            runLog.line("tile " + (idx + 1) + "/" + total + ": +" + coreFibers.size() + " fiber(s)");
             if (coreFibers.isEmpty()) {
                 return;
             }
@@ -7169,7 +7171,7 @@ public final class FiberAnalysisDialog {
                         runLog.close();
                         runServerLogDir = null;
                         runServerLogFile = null;
-                        setBusy(false, "Cancelled — settings unchanged.");
+                        setBusy(false, "Canceled — settings unchanged.");
                         return;
                     }
                     AnalyzeResult res = analyzeRegion(
@@ -7194,14 +7196,14 @@ public final class FiberAnalysisDialog {
                         String toAnn = "Create " + objects.size() + " annotations anyway";
                         String cancel = "Cancel (add nothing)";
                         String pick = Dialogs.showChoiceDialog(TITLE,
-                                objects.size() + " fibres would be added as ANNOTATIONS.\n\n"
+                                objects.size() + " fibers would be added as ANNOTATIONS.\n\n"
                                         + "More than ~" + ANNOTATION_WARN_COUNT + " annotations can make "
                                         + "QuPath very slow or crash it. Detections hold the same "
                                         + "measurements and stay responsive. For ground-truth editing, "
                                         + "use annotations on a smaller region.",
                                 List.of(toDet, toAnn, cancel), toDet);
                         if (pick == null || cancel.equals(pick)) {
-                            runLog.line("CANCELLED at commit: declined to add " + objects.size()
+                            runLog.line("CANCELED at commit: declined to add " + objects.size()
                                     + " annotations.");
                             runLog.close();
                             runServerLogDir = null;
@@ -7350,7 +7352,7 @@ public final class FiberAnalysisDialog {
         new Thread(() -> {
             try {
                 if (withFibers && !guardHeavyRun(channel, d, "Show tile in viewer", false)) {
-                    setBusy(false, "Cancelled — settings unchanged.");
+                    setBusy(false, "Canceled — settings unchanged.");
                     return;
                 }
                 final List<FiberSocketClient.Fiber> fibers;
@@ -7394,7 +7396,7 @@ public final class FiberAnalysisDialog {
                     vw.repaint();
                     refreshClearOverlayUi(); // reveal both 'Clear overlay' buttons + amber halo
                     setBusy(false, withFibers
-                            ? fibers.size() + " fibre(s) + threshold mask shown on the image at full "
+                            ? fibers.size() + " fiber(s) + threshold mask shown on the image at full "
                                     + "resolution — zoom/pan freely. 'Clear overlay' clears it."
                             : (showSecondThreshold ? "2nd-pass" : "Threshold") + " mask ("
                                     + trimNum(maskThreshNative) + ") shown on the image at full "

@@ -162,7 +162,7 @@ public final class TMEQuant {
                         p.createDetections ? "detections" : "annotations");
             }
         } catch (Exception ex) {
-            throw new RuntimeException("TME-Quant fibre detection failed: " + ex.getMessage()
+            throw new RuntimeException("TME-Quant fiber detection failed: " + ex.getMessage()
                     + " — is the FIRE server running? (Extensions ▸ TME Quant ▸ Ping fiber server)",
                     ex);
         }

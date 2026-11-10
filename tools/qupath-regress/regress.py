@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """End-to-end regression checks for TME Quant, run inside a real QuPath through qupath-mcp.
 
-The Python harness proves the fibre server; this proves the QuPath side: the dialog, the batch
+The Python harness proves the fiber server; this proves the QuPath side: the dialog, the batch
 dialog, the headless API, run logs and the objects that end up in the hierarchy. Each scenario
 drives QuPath the way a person would (open the dialog, set controls by their labels, press the
 button) and then reads the result back with Groovy as a fingerprint: object count, classes, and
@@ -17,7 +17,7 @@ detection output shows up as a failure that names the scenario and the field tha
 again after an intended change.
 
 Needs: a QuPath 0.7 with this extension and the qupath-mcp extension installed, its MCP server on
-MCP_PORT (default 51516, the Linux QuPath), and the fibre server on 5101. Paths come from the
+MCP_PORT (default 51516, the Linux QuPath), and the fiber server on 5101. Paths come from the
 environment (see CONFIG below).
 """
 import argparse
@@ -239,7 +239,12 @@ BASE = [("set", "Downsample", 1), ("set", "Parallel tiles", 1),
         ("set", "Restrict to selected object (mask + clip)", "false"),
         ("set", "Classify TACS relative to a boundary", "false"),
         ("set", "Create detections (not annotations)", "true"),
-        ("set", "Remove existing Fiber/TACS objects in the region first", "true")]
+        ("set", "Remove existing Fiber/TACS objects in the region first", "true"),
+        # Also remembered, and set by the MH_FNA runs (Seed spacing 8, Anti-flow on), which moved
+        # the FIRE baselines from 119 to 118 fibers until they were reset here too.
+        ("select", "Detection preset", "Custom"),
+        ("set", "Smoothing (sigma, px)", 0), ("set", "Seed spacing (um, lower = denser seeding)", 16),
+        ("set", "Anti-flow check (adds a per-fiber score)", "false")]
 FIRE = [("select", "Tracer", "FIRE (seed & extend)")]
 FLOW = [("select", "Tracer", "Flow (orientation field)")]
 CENTERLINE = [("select", "Tracer", "Centerline (medial axis)")]
@@ -296,6 +301,26 @@ def s_fire_parallel_requested(q):
     return serial, fails
 
 
+def s_fire_smoothing(q):
+    """FIRE at Smoothing 1 on unmodified CT-FIRE: the server's threshold compensation keeps fibers."""
+    # CT-FIRE's smooth() scales a 2D image by the kernel's center weight (0.40 at sigma 1), so
+    # without the compensation in fiber_socket_server._fire_params_for_smoothing almost nothing
+    # passes the threshold and the count collapses.
+    reset_hierarchy(q, rects=[(4000, 2500, 1600, 1600)])
+    open_dialog(q)
+    set_controls(q, BASE + FIRE)
+    apply_dialog(q)
+    n0 = fingerprint(q)["n"]
+    set_controls(q, [("set", "Smoothing (sigma, px)", 1)])
+    apply_dialog(q)
+    fp = fingerprint(q)
+    set_controls(q, [("set", "Smoothing (sigma, px)", 0)])
+    fails = []
+    if fp["n"] < 0.5 * n0:
+        fails.append(f"Smoothing 1 gave {fp['n']} fibers against {n0} at Smoothing 0 (needs at least half)")
+    return fp, fails
+
+
 def s_headless_vs_dialog(q):
     """TMEQuant.detectFibers on an annotation vs the dialog on the same region, FIRE defaults."""
     reset_hierarchy(q, rects=[(4000, 2500, 1600, 1600)], named=["region"])
@@ -324,7 +349,7 @@ ELLIPSE = (4200, 2700, 2000, 1600)
 
 
 def s_restrict_to_object(q):
-    """Restrict-to-object on an ellipse: fibres well inside must come out unchanged."""
+    """Restrict-to-object on an ellipse: fibers well inside must come out unchanged."""
     reset_hierarchy(q, shapes=[ELLIPSE])
     open_dialog(q)
     set_controls(q, BASE + FLOW)
@@ -354,11 +379,11 @@ def s_restrict_to_object(q):
         worst = max(worst, min(d, 180 - d))
     fails = []
     if len(inner) < 5:
-        fails.append(f"only {len(inner)} fibres well inside the ellipse; nothing to compare")
+        fails.append(f"only {len(inner)} fibers well inside the ellipse; nothing to compare")
     if missing:
-        fails.append(f"{missing}/{len(inner)} fibres well inside the ellipse vanished under restrict-to-object")
+        fails.append(f"{missing}/{len(inner)} fibers well inside the ellipse vanished under restrict-to-object")
     if worst > 1.0:
-        fails.append(f"angle of a fibre well inside moved by {worst:.1f} deg under restrict-to-object")
+        fails.append(f"angle of a fiber well inside moved by {worst:.1f} deg under restrict-to-object")
     fp["restrict_inner"] = len(inner)
     return fp, fails
 
@@ -390,7 +415,7 @@ def s_tacs(q):
 
 
 def s_batch_two_images(q):
-    """Batch over two project images (inside annotations): both get fibres, one global scale."""
+    """Batch over two project images (inside annotations): both get fibers, one global scale."""
     proj = os.path.join(CONFIG["workdir"], "proj2")
     q.groovy(f'''import qupath.lib.projects.Projects
 import qupath.lib.images.servers.ImageServers
@@ -439,7 +464,7 @@ return groovy.json.JsonOutput.toJson(p.getImageList().collectEntries { e ->
     norms = [l.split("norm=", 1)[1].split()[0:6] for l in log_lines_since(mark) if ": norm=" in l]
     fails = []
     if any(v == 0 for v in counts.values()) or len(counts) != 2:
-        fails.append(f"per-image fibre counts {counts}")
+        fails.append(f"per-image fiber counts {counts}")
     if not summary:
         fails.append("no 'Finished.' summary in the batch dialog")
     close_dialogs(q)
@@ -505,7 +530,7 @@ return groovy.json.JsonOutput.toJson(p.getImageList().collectEntries { e ->
     counts = json.loads(counts)
     fails = []
     if counts.get("liver_calibrated", 0) == 0:
-        fails.append(f"the calibrated image got no fibres: {counts}")
+        fails.append(f"the calibrated image got no fibers: {counts}")
     if counts.get("liver_uncalibrated", 0) != 0:
         fails.append(f"the uncalibrated image was traced with micron settings: {counts}")
     if "no pixel size, and the settings are in µm" not in shown:
@@ -563,7 +588,7 @@ return "ok"''')
 
 
 def s_large_postprocess(q):
-    """Enough fibres to take the blocked post-process path (> 20,000) and check it completes."""
+    """Enough fibers to take the blocked post-process path (> 20,000) and check it completes."""
     reset_hierarchy(q, rects=[(0, 0, 10320, 7720)])
     open_dialog(q)
     set_controls(q, BASE + CENTERLINE + [("set", "Parallel tiles", 6),
@@ -582,7 +607,7 @@ def s_large_postprocess(q):
     if not blocked:
         raw = [l for l in lines if "Post-process:" in l]
         n_raw = int(raw[-1].split("Post-process:", 1)[1].split()[0]) if raw else 0
-        fails.append(f"blocked path not taken ({n_raw} raw fibres; it needs > 20000 -- lower the threshold)")
+        fails.append(f"blocked path not taken ({n_raw} raw fibers; it needs > 20000 -- lower the threshold)")
     elif len(passes) < 2:
         fails.append(f"blocked post-process logged {len(passes)} of its 2 passes")
     if broken:
@@ -594,6 +619,7 @@ SCENARIOS = {
     "flow_parallel": s_flow_parallel,
     "centerline_parallel": s_centerline_parallel,
     "fire_parallel_requested": s_fire_parallel_requested,
+    "fire_smoothing": s_fire_smoothing,
     "headless_vs_dialog": s_headless_vs_dialog,
     "restrict_to_object": s_restrict_to_object,
     "tacs": s_tacs,
