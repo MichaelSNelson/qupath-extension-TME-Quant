@@ -27,6 +27,9 @@ properties; QuPath draws them as line/polyline **annotations** (or **detections*
 | File | Role |
 |------|------|
 | `fiber_socket_server.py` | TCP server. Wraps the FIRE pipeline; synthetic fallback when the compiled backend is unavailable. |
+| `fire_worker.py` | The isolated FIRE worker process (a FIRE crash cannot take the server down). |
+| `fire_fibers.py` | Turns FIRE's output into fibers; shared by the server and the worker so both return the same fibers. |
+| `trace_worker.py` | Worker process for the Centerline and Flow tracers. |
 | `fiber_socket_client_test.py` | Python stand-in for QuPath: sends a test region, prints fibers, can write an overlay PNG. |
 | `JavaWireTest.java` | JDK-only client proving the Java framing is wire-compatible with the server. |
 | `../qupath-extension-tme-quant/` | The QuPath extension (Java). |

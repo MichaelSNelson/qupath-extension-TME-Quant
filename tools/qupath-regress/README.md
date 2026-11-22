@@ -38,9 +38,9 @@ and lists the files. The main-window PNG is several MB on a HiDPI screen; nothin
 Every scenario first sets downsample, threshold, minimum length, Smoothing, Seed spacing, the
 Anti-flow check, the Detection preset, the tracer and the output checkboxes, and unticks exclusion
 regions, because the dialog persists its settings between runs. Settings left by other work once
-moved the FIRE baselines from 119 to 118 fibers. The fingerprints are recorded with the scenarios
-run in this order: run on its own, `fire_parallel_requested` finds 120 fibers instead of 119,
-because its tiles come out 2 px smaller (not yet explained).
+moved the FIRE baselines from 119 to 118 fibers. The FIRE fingerprints assume the server's
+isolated FIRE worker and its in-process path return the same fibers, which holds since 0.2.8
+(before, the worker's copy gave 119 where in-process gave 120).
 
 ## Setup
 
@@ -72,7 +72,8 @@ python3 gt_score.py --project /mnt/g/MH_FNA/project.qpproj --entry 258 \
 
 It writes the scores, the traced lines and every detection to `--out`, so other tolerances can be
 re-scored offline with `gt_score.score()`. It changes the dialog's saved threshold, downsample,
-min length, seed spacing and extra params; reset them before running `regress.py`.
+min length, seed spacing and extra params while it runs, and puts them back when it ends, also
+after an error.
 
 On that box (176 traced fibres, threshold mapped to `thresh_im2` 77, Min length 4 µm, Seed spacing
 8 µm, 2026-10-21), 0.2.4's FIRE settings hit 11 traced fibres where 0.2.3's µm-converted ones hit 1

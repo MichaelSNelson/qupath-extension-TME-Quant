@@ -18,6 +18,8 @@ import os
 import sys
 from pathlib import Path
 
+from fire_fibers import fibers_from_fire  # no numpy at import, so the backend still loads first
+
 # Set lazily in worker_init, AFTER fiber_backend has loaded.
 np = None
 _FIRE = None
@@ -124,76 +126,11 @@ def worker_probe():
     return _BACKEND_OK, _BACKEND_ERR
 
 
-# --- fiber reconstruction (mirror of the server's _fibers_from_fire) ---
-def _angle_from_endpoints(p0, p1):
-    drow = p1[0] - p0[0]
-    dcol = p1[1] - p0[1]
-    return float(np.degrees(np.arctan2(-drow, dcol)) % 180.0)
-
-
-def _approx_width(fa_verts, Ra):
-    try:
-        idx = [v for v in fa_verts if 0 <= v < len(Ra)]
-        if not idx:
-            return float("nan")
-        return float(2.0 * np.mean(np.asarray(Ra)[idx]))
-    except Exception:  # noqa: BLE001
-        return float("nan")
-
-
-def _fibers_from_fire(data, ll1):
-    Fai = data.get("Fai", [])
-    Xai = np.asarray(data.get("Xai", np.empty((0, 3))))
-    Fa = data.get("Fa", [])
-    Ra = np.asarray(data.get("Ra", np.array([])))
-    M = data.get("M", {})
-    L = np.asarray(M.get("L", np.array([])))
-
-    fibers = []
-    out_id = 0
-    for i in range(len(Fai)):
-        if i >= len(L):
-            continue
-        arc_len = float(L[i])
-        if arc_len <= ll1:
-            continue
-        verts = Fai[i].get("v", [])
-        if len(verts) < 2:
-            continue
-        vidx = [v for v in verts if 0 <= v < len(Xai)]
-        if len(vidx) < 2:
-            continue
-        path_rc = Xai[vidx, :2]
-        points = [[float(p[1]), float(p[0])] for p in path_rc]
-        p_start, p_end = path_rc[0], path_rc[-1]
-        end_len = float(np.linalg.norm(p_end - p_start))
-        straightness = (end_len / arc_len) if arc_len > 0 else float("nan")
-        mid = path_rc[len(path_rc) // 2]
-        center = [float(mid[1]), float(mid[0])]
-        fa_verts = Fa[i].get("v", []) if i < len(Fa) else []
-        width = _approx_width(fa_verts, Ra)
-        fibers.append(
-            {
-                "id": out_id,
-                "points": points,
-                "center": center,
-                "angle": _angle_from_endpoints(p_start, p_end),
-                "length_arc": arc_len,
-                "length_end": end_len,
-                "width": width,
-                "straightness": straightness,
-                "tacs": None,
-            }
-        )
-        out_id += 1
-    return fibers
-
-
 def worker_fire(fire_params_value, ll1, image):
     """Run FIRE + reconstruct polylines. `image` is the final 0-255 float image
-    (normalisation handled by the server's analyze_real). May segfault (contained)."""
+    (normalization handled by the server's analyze_real). May segfault (contained)."""
     im3 = np.ascontiguousarray(image, dtype=np.float32)[np.newaxis, :, :]
     data = _FIRE(p=fire_params_value, im=im3, plotflag=0)
     if not data:
         return []
-    return _fibers_from_fire(data, ll1)
+    return fibers_from_fire(data, ll1)

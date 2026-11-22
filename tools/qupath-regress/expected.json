@@ -24,18 +24,18 @@
   },
   "fire_parallel_requested": {
     "classes": {
-      "Fiber": 119
+      "Fiber": 120
     },
-    "n": 119,
-    "roi_length": 27371.79,
+    "n": 120,
+    "roi_length": 27465.54,
     "run_ids": 1,
     "sums": {
-      "Angle (deg)": 12457.64,
-      "Curvature (deg/um)": 2072.0,
-      "Length (um)": 4721.63,
-      "Straightness": 109.55,
-      "Width mean (um)": 130.53,
-      "Width median (um)": 83.68
+      "Angle (deg)": 12616.25,
+      "Curvature (deg/um)": 2104.45,
+      "Length (um)": 4737.8,
+      "Straightness": 110.42,
+      "Width mean (um)": 131.61,
+      "Width median (um)": 84.77
     }
   },
   "fire_smoothing": {
@@ -73,34 +73,34 @@
   "headless_vs_dialog": {
     "dialog": {
       "classes": {
-        "Fiber": 119
+        "Fiber": 120
       },
-      "n": 119,
-      "roi_length": 27371.79,
+      "n": 120,
+      "roi_length": 27465.54,
       "run_ids": 1,
       "sums": {
-        "Angle (deg)": 12457.64,
-        "Curvature (deg/um)": 2072.0,
-        "Length (um)": 4721.63,
-        "Straightness": 109.55,
-        "Width mean (um)": 130.53,
-        "Width median (um)": 83.68
+        "Angle (deg)": 12616.25,
+        "Curvature (deg/um)": 2104.45,
+        "Length (um)": 4737.8,
+        "Straightness": 110.42,
+        "Width mean (um)": 131.61,
+        "Width median (um)": 84.77
       }
     },
     "headless": {
       "classes": {
-        "Fiber": 119
+        "Fiber": 120
       },
-      "n": 119,
-      "roi_length": 27371.79,
+      "n": 120,
+      "roi_length": 27465.54,
       "run_ids": 1,
       "sums": {
-        "Angle (deg)": 12457.64,
-        "Curvature (deg/um)": 2072.0,
-        "Length (um)": 4721.63,
-        "Straightness": 109.55,
-        "Width mean (um)": 130.53,
-        "Width median (um)": 83.68
+        "Angle (deg)": 12616.25,
+        "Curvature (deg/um)": 2104.45,
+        "Length (um)": 4737.8,
+        "Straightness": 110.42,
+        "Width mean (um)": 131.61,
+        "Width median (um)": 84.77
       }
     }
   },

@@ -187,7 +187,10 @@ The server needs the FIRE pipeline, which lives in a folder called **`tme-quant`
 Copy these files (created alongside this guide) into
 `F:\CTFireTest\fiber_socket_bridge\` if they aren't there already:
 `setup_fire_server.sh`, `start_fire_server.sh`, `test_fire_server.sh`,
-`Start-FireServer.ps1`, and this `WINDOWS_SETUP_GUIDE.md`.
+`Start-FireServer.ps1`, and this `WINDOWS_SETUP_GUIDE.md`. The server itself is the four Python
+files `fiber_socket_server.py`, `fire_worker.py`, `fire_fibers.py` and `trace_worker.py`; copy
+all four whenever you update the server (since 0.2.8 the server does not start without
+`fire_fibers.py`).
 
 When done, your folder looks like:
 ```

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.8
+
+**The FIRE worker returns the same fibers as the in-process path.** FIRE normally runs in a
+separate worker process (so a crash cannot take the server down), and that worker had its own,
+older copy of the code that turns FIRE's output into fibers. It applied the Min length cut before
+post-processing and reported only the mean width. As a result the run's "traced vs dropped by
+Min length" counts were wrong (the drops were already gone, so the "Min length too high" hint
+could not appear), and a fiber the centerline step did not re-measure had no median, max or SD
+width. Both paths now share one implementation (`server/fire_fibers.py`, a new file the server
+needs). On a test tile both return exactly what the in-process path returned before. In the
+regression suite the FIRE baseline goes from 119 to 120 fibers, the count the 0.2.7 server gives
+with the worker switched off.
+
+**Raw mode runs FIRE with the parameters as sent.** 0.2.7's Smoothing threshold compensation was
+also applied in raw mode, which promises plain FIRE.
+
+**Server messages in American English**, matching the dialog since 0.2.7 (28 log and hint
+strings, e.g. "Flow tracer: N fiber(s)").
+
+**Regression tools.** The suite stops as soon as QuPath logs an exception instead of waiting
+out the 30-minute timeout; `batch_two_images` now checks that both images were normalized on
+one scale (it collected the values from the wrong log and never compared them); `gt_score.py`
+restores the dialog settings it changes, also after an error.
+
+**Update the server:** copy all four Python files from `server/` (including the new
+`fire_fibers.py`) and restart it.
+
 ## 0.2.7
 
 **Smoothing works with the FIRE tracer on an unmodified tme-quant.** CT-FIRE's `smooth()` dims a

@@ -21,6 +21,7 @@ MCP_PORT (default 51516, the Linux QuPath), and the fiber server on 5101. Paths 
 environment (see CONFIG below).
 """
 import argparse
+import glob
 import json
 import os
 import sys
@@ -119,6 +120,9 @@ def wait_log(mark, needle, timeout=1800, also_fail=("Exception in thread",)):
             lines = f.readlines()[mark:]
         if any(needle in l for l in lines):
             return lines
+        bad = [l.strip() for l in lines if any(s in l for s in also_fail)]
+        if bad:
+            raise RuntimeError(f"QuPath logged {bad[0]!r} while waiting for '{needle}'")
         time.sleep(2)
     raise TimeoutError(f"'{needle}' not in QuPath's log after {timeout}s")
 
@@ -460,11 +464,23 @@ return groovy.json.JsonOutput.toJson(p.getImageList().collectEntries { e ->
     def d = e.readImageData()
     [e.getImageName(), d.getHierarchy().getDetectionObjects().count { it.getPathClass()?.toString() == "Fiber" }] })''')
     counts = json.loads(counts)
-    lines = wait_log(mark, "Image data written")
-    norms = [l.split("norm=", 1)[1].split()[0:6] for l in log_lines_since(mark) if ": norm=" in l]
+    wait_log(mark, "Image data written")
     fails = []
     if any(v == 0 for v in counts.values()) or len(counts) != 2:
         fails.append(f"per-image fiber counts {counts}")
+    # One global scale: every region's norm= line in the run's own log (not QuPath's) must carry
+    # the same intensity mapping; only the region differs.
+    logs = sorted(glob.glob(os.path.join(proj, "logs", "fiber-analysis", "*-client.txt")))
+    keys = ("normLo", "normHi", "serverNormHi", "thresh_im2")
+    norms = []
+    for l in (open(logs[-1], errors="replace").read().splitlines() if logs else []):
+        if " r" in l and ": norm=" in l:
+            kv = dict(t.split("=", 1) for t in l.split(": norm=", 1)[1].split() if "=" in t)
+            norms.append(tuple(kv.get(k) for k in keys))
+    if len(norms) != 2:
+        fails.append(f"expected 2 per-region norm= lines in the run log, found {len(norms)}")
+    elif len(set(norms)) != 1:
+        fails.append(f"images normalized on different scales: {norms}")
     if not summary:
         fails.append("no 'Finished.' summary in the batch dialog")
     close_dialogs(q)
@@ -574,11 +590,6 @@ return groovy.json.JsonOutput.toJson(files.collect {{ it.getAbsolutePath() }})''
         except OSError:
             kept.append(p)
     return kept
-
-
-def log_lines_since(mark):
-    with open(CONFIG["qupath_log"], errors="replace") as f:
-        return f.readlines()[mark:]
 
 
 def select_first_annotation(q):

@@ -22,6 +22,7 @@ threshold is found by bisection: the native value that maps to --thresh-im2 on -
 which is how the original run was normalised.
 """
 import argparse
+import base64
 import json
 import math
 import os
@@ -76,6 +77,26 @@ def im2 = { double t ->
     FiberParams.serverThreshIm2(t, n[0], n[1], n[2]) }
 40.times { double mid = (lo + hi) / 2; if (im2(mid) < target) lo = mid else hi = mid }
 return groovy.json.JsonOutput.toJson([threshold: Math.round(hi), thresh_im2: im2(Math.round(hi))])
+'''
+
+# The settings GROOVY_RUN changes, as JSON (unit-scoped ones for a calibrated image, as it uses).
+GROOVY_SAVE_PREFS = r'''
+import qupath.ext.tmequant.FiberSocketPreferences as P
+return groovy.json.JsonOutput.toJson([threshold: P.getThreshold(), downsample: P.downsampleProperty().get(),
+    minlen: P.minLengthProperty().forUnit(true).get(), seed: P.seedSpacingProperty().forUnit(true).get(),
+    extra: P.extraParamsProperty().get()])
+'''
+
+GROOVY_RESTORE_PREFS = r'''
+import qupath.ext.tmequant.FiberSocketPreferences as P
+def s = new groovy.json.JsonSlurper().parseText(new String('%(saved_b64)s'.decodeBase64(), 'UTF-8'))
+P.setThreshold(s.threshold as double)
+P.downsampleProperty().set(s.downsample as double)
+P.minLengthProperty().forUnit(true).set(s.minlen as double)
+P.seedSpacingProperty().forUnit(true).set(s.seed as double)
+P.extraParamsProperty().set(s.extra ?: "")
+qupath.getImageData()?.setChanged(false)
+return 1
 '''
 
 GROOVY_RUN = r'''
@@ -192,11 +213,11 @@ def main():
     ap.add_argument("--image", required=True, help="the entry's image FILE (opened directly)")
     ap.add_argument("--thresh-im2", type=int, default=77)
     ap.add_argument("--norm-region", default="2080,32,91616,73152",
-                    help="x,y,w,h the original run was normalised on (full-res px)")
+                    help="x,y,w,h the original run was normalized on (full-res px)")
     ap.add_argument("--norm-down", type=float, default=1.0)
     ap.add_argument("--min-length-um", type=float, default=4.0)
     ap.add_argument("--seed-spacing-um", type=float, default=8.0)
-    ap.add_argument("--tol", type=float, default=8.0, help="px a sample may lie from a traced fibre")
+    ap.add_argument("--tol", type=float, default=8.0, help="px a sample may lie from a traced fiber")
     ap.add_argument("--angle", type=float, default=30.0, help="max direction difference, degrees")
     ap.add_argument("--out", default="gt_score.json")
     a = ap.parse_args()
@@ -206,13 +227,25 @@ def main():
     R.close_dialogs(q)
     setup = json.loads(q.groovy(GROOVY_SETUP % {"project": a.project, "entry": a.entry,
                                                 "image": a.image}, timeout_s=1200)[0])
-    print(f"box {setup['box']}  traced fibres {len(setup['gt'])}  pixel size {setup['px_um']} um")
+    print(f"box {setup['box']}  traced fibers {len(setup['gt'])}  pixel size {setup['px_um']} um")
     nx, ny, nw, nh = (int(v) for v in a.norm_region.split(","))
     thr = json.loads(q.groovy(GROOVY_THRESHOLD % {"target": a.thresh_im2, "nx": nx, "ny": ny,
                                                   "nw": nw, "nh": nh, "down": a.norm_down},
                               timeout_s=1200)[0])
     print(f"native threshold {thr['threshold']} -> thresh_im2 {thr['thresh_im2']} on the norm region")
     results = {"settings": vars(a), "threshold": thr, "box": setup["box"], "gt": setup["gt"], "sets": {}}
+    # GROOVY_RUN changes the dialog's saved settings; put them back however the loop ends.
+    saved = q.groovy(GROOVY_SAVE_PREFS)[0]
+    try:
+        _run_sets(q, a, thr, setup, results)
+    finally:
+        q.groovy(GROOVY_RESTORE_PREFS % {"saved_b64": base64.b64encode(saved.encode()).decode()})
+    with open(a.out, "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"wrote {a.out}")
+
+
+def _run_sets(q, a, thr, setup, results):
     for name, s in SETS.items():
         run = json.loads(q.groovy(GROOVY_RUN % {"threshold": thr["threshold"], "minlen": a.min_length_um,
                                                 "seed": a.seed_spacing_um,
@@ -221,11 +254,6 @@ def main():
         sc = score(run["fibres"], setup["gt"], a.tol, a.angle)
         results["sets"][name] = {"extra": s["extra"], **sc, "fibres": run["fibres"]}
         print(f"{name:24s} " + "  ".join(f"{k}={v}" for k, v in sc.items()))
-    q.groovy('import qupath.ext.tmequant.FiberSocketPreferences as P\nP.extraParamsProperty().set("")\n'
-             'qupath.getImageData()?.setChanged(false)\nreturn 1')
-    with open(a.out, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"wrote {a.out}")
 
 
 if __name__ == "__main__":

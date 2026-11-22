@@ -435,54 +435,6 @@ def _try_import_pipeline(repo_root: Path) -> bool:
 # ---------------------------------------------------------------------------
 # Geometry helpers
 # ---------------------------------------------------------------------------
-def _angle_from_endpoints(p0, p1) -> float:
-    """Fiber angle in degrees [0,180) in the pipeline's y-down convention.
-
-    p0, p1 are (row, col).  Matches draw_curvs: positive angle tilts the line
-    up-to-the-right because screen y grows downward.
-    """
-    drow = p1[0] - p0[0]
-    dcol = p1[1] - p0[1]
-    return float(np.degrees(np.arctan2(-drow, dcol)) % 180.0)
-
-
-def _approx_width(fa_verts, Ra) -> float:
-    """Approximate fiber width = 2 * mean radius over the fiber's vertices."""
-    try:
-        idx = [v for v in fa_verts if 0 <= v < len(Ra)]
-        if not idx:
-            return float("nan")
-        return float(2.0 * np.mean(np.asarray(Ra)[idx]))
-    except Exception:  # noqa: BLE001
-        return float("nan")
-
-
-def _width_fields(w):
-    """The width measurements every tracer reports, from the per-vertex widths `w` (analysed px).
-
-    Mean AND median: the samples are skewed by junctions and blobs the trace passes through
-    (a junction doubles the local distance-map radius), so the mean overstates a clean fibre
-    while the median tracks its body; the ratio of the two flags a contaminated trace. `width`
-    stays the MEAN on every tracer -- it also drives the widMAX filter, which must mean the same
-    thing whichever tracer ran. NaNs when there are no samples.
-    """
-    w = np.asarray(w, dtype=float).ravel()
-    if w.size == 0:
-        nan = float("nan")
-        return {"width": nan, "width_median": nan, "width_max": nan, "width_std": nan}
-    return {"width": float(np.mean(w)), "width_median": float(np.median(w)),
-            "width_max": float(np.max(w)), "width_std": float(np.std(w))}
-
-
-def _width_stats(fa_verts, Ra):
-    """Width fields (see `_width_fields`) over a FIRE fibre's vertices (width = 2*radius)."""
-    try:
-        idx = [v for v in fa_verts if 0 <= v < len(Ra)]
-        return _width_fields(2.0 * np.asarray(Ra)[idx].astype(float) if idx else [])
-    except Exception:  # noqa: BLE001
-        return _width_fields([])
-
-
 def _valley_cut_edges(pts, smooth, thr, valley_frac, win_px=12.0, step=1.0):
     """Edges where a fibre's path crosses a darker seam between two bright stretches.
 
@@ -611,10 +563,10 @@ def _snap_to_centerline(fibers, image, thr, search_px=6, penalty=0.15, iters=3, 
             wv = 2.0 * dmap[np.clip(np.round(P[:, 1]).astype(int), 0, H - 1),
                             np.clip(np.round(P[:, 0]).astype(int), 0, W - 1)]
             if wv.size and float(wv.max()) > 0:
-                nf.update(_width_fields(wv))
+                nf.update(width_fields(wv))
             out.append(nf)
         except Exception as exc:  # noqa: BLE001 - never let refinement fail a tile
-            logger.debug("centreline snap skipped a fibre (%s)", exc)
+            logger.debug("centerline snap skipped a fiber (%s)", exc)
             out.append(f)
     return out
 
@@ -716,7 +668,7 @@ def _split_bridging_fibers(fibers, image, thr, min_edge_px=8.0, gap_frac=0.4,
             nf["straightness"] = straight
             out.append(nf)  # width_* inherited from the parent (pieces share ~its thickness)
       except Exception as exc:  # noqa: BLE001 - never let a split edge-case fail the whole tile
-        logger.debug("bridge-split skipped a fibre (%s)", exc)
+        logger.debug("bridge-split skipped a fiber (%s)", exc)
         out.append(f)
     for j, f in enumerate(out):
         f["id"] = j
@@ -787,7 +739,7 @@ def _apply_exclusion(fibers, excl, max_frac=0.5, trim=True, min_len=0.0, step_px
         try:
             frac, inside, s = _exclusion_coverage(pts, excl, step_px)
         except Exception as exc:  # noqa: BLE001 - never let a mask edge-case fail the tile
-            logger.debug("exclusion skipped a fibre (%s)", exc)
+            logger.debug("exclusion skipped a fiber (%s)", exc)
             out.append(f)
             continue
         if len(inside) == 0:
@@ -1056,63 +1008,6 @@ def _debug_export_payload(gray: np.ndarray, thr: float, fibers: list) -> dict:
         "height": int(g.shape[0]),
         "n_fibers": len(fibers),
     }
-
-
-def _fibers_from_fire(data: dict, ll1: float) -> list:
-    """Reconstruct one polyline per fiber from a fire_2d_angle output dict.
-
-    Each fiber i is the ordered vertex path ``Xai[Fai[i]['v']]`` (row, col).
-    Mirrors pycurvelets.get_fire._build_fiber_dataframe's source data but keeps
-    the *whole* centerline instead of flattening to per-vertex rows.
-    """
-    Fai = data.get("Fai", [])
-    Xai = np.asarray(data.get("Xai", np.empty((0, 3))))
-    Fa = data.get("Fa", [])
-    Xa = np.asarray(data.get("Xa", np.empty((0, 3))))
-    Ra = np.asarray(data.get("Ra", np.array([])))
-    M = data.get("M", {})
-    L = np.asarray(M.get("L", np.array([])))
-
-    # NOTE: the LL1 (min-length) filter is applied by analyze_real, not here, so it
-    # can report how many fibers FIRE traced vs how many survived the length cut
-    # (a too-high Min length is a common reason for "no fibers"). ll1 is unused.
-    fibers = []
-    out_id = 0
-    for i in range(len(Fai)):
-        if i >= len(L):
-            continue
-        arc_len = float(L[i])
-        verts = Fai[i].get("v", [])
-        if len(verts) < 2:
-            continue
-        vidx = [v for v in verts if 0 <= v < len(Xai)]
-        if len(vidx) < 2:
-            continue
-        path_rc = Xai[vidx, :2]  # (row, col), ordered along the fiber
-
-        # points for QuPath: (x=col, y=row)
-        points = [[float(p[1]), float(p[0])] for p in path_rc]
-        p_start, p_end = path_rc[0], path_rc[-1]
-        end_len = float(np.linalg.norm(p_end - p_start))
-        straightness = (end_len / arc_len) if arc_len > 0 else float("nan")
-        mid = path_rc[len(path_rc) // 2]
-        center = [float(mid[1]), float(mid[0])]  # (x, y)
-        fa_verts = Fa[i].get("v", []) if i < len(Fa) else []
-        fibers.append(
-            {
-                "id": out_id,
-                "points": points,            # full centerline polyline
-                "center": center,
-                "angle": _angle_from_endpoints(p_start, p_end),
-                "length_arc": arc_len,
-                "length_end": end_len,
-                **_width_stats(fa_verts, Ra),  # width (MEAN, drives widMAX), median, max, std
-                "straightness": straightness,
-                "tacs": None,
-            }
-        )
-        out_id += 1
-    return fibers
 
 
 # ---------------------------------------------------------------------------
@@ -1579,11 +1474,11 @@ def postprocess_fibers(fibers, mask, dist_thresh, do_stitch, dedup_tol, stitch_t
         # alongside each other are collinear at the seam and pass the stitch's angle test.
         fibers, n_retrace = _split_self_retrace(fibers)
         if n_retrace:
-            logger.info("postproc: cut %d stitched fibre(s) that doubled back on themselves.",
+            logger.info("postproc: cut %d stitched fiber(s) that doubled back on themselves.",
                         n_retrace)
         fibers = _dedup_overlapping_paths(fibers)
         if len(fibers) != after_stitch:
-            logger.info("postproc: path-dedup removed %d near-duplicate fibre(s) that the "
+            logger.info("postproc: path-dedup removed %d near-duplicate fiber(s) that the "
                         "centroid dedup skips (same-tile pairs, e.g. from two-pass).",
                         after_stitch - len(fibers))
         logger.info("postproc: %d -> %d fibers (dedup+stitch)", before, len(fibers))
@@ -1867,6 +1762,7 @@ def gridsearch(image: np.ndarray, meta: dict) -> dict:
 # numpy/scipy and avoid the "DLL load failed ... procedure could not be found"
 # version skew seen on MSYS2 spawn.
 import fire_worker  # noqa: E402
+from fire_fibers import fibers_from_fire, width_fields  # noqa: E402 - also used by fire_worker
 
 
 def _inprocess_fire(fire_params_value, ll1, image):
@@ -1876,7 +1772,7 @@ def _inprocess_fire(fire_params_value, ll1, image):
     data = _FIRE(p=fire_params_value, im=im3, plotflag=0)
     if not data:
         return []
-    return _fibers_from_fire(data, ll1)
+    return fibers_from_fire(data, ll1)
 
 
 def _get_executor():
@@ -1938,22 +1834,22 @@ def _analyze_in_worker(image, meta, mask, exclude, n):
 
 
 _SEED_HINT = (
-    "This tile produced too many fibre fragments for FIRE's linking step to hold (it grows with "
-    "the fibre COUNT and how many fibres cross at shared points, not overall brightness). Try, in "
-    "order: raise 'Seed spacing' (fewer fibres), raise 'Downsample' (merges crossings and shrinks "
+    "This tile produced too many fiber fragments for FIRE's linking step to hold (it grows with "
+    "the fiber COUNT and how many fibers cross at shared points, not overall brightness). Try, in "
+    "order: raise 'Seed spacing' (fewer fibers), raise 'Downsample' (merges crossings and shrinks "
     "the tile), or enable 'Ridge enhancement' (thins solid bundles). Raising the threshold helps "
     "least. In a full run this single tile is skipped and every other tile still processes normally."
 )
 
 
 _WEB_HINT = (
-    "The collagen in this tile is one CONNECTED WEB rather than separate fibres, so FIRE's "
+    "The collagen in this tile is one CONNECTED WEB rather than separate fibers, so FIRE's "
     "extension step can walk the whole tile from any seed and its linking step has to hold all of "
     "it at once. Raising 'Seed spacing' does NOT help (the walk, not the seed count, is the cost) "
     "and raising 'Downsample' makes it WORSE (it merges the gaps that still separate the strands). "
     "What does help, in order: raise the 'Background threshold' until the web breaks apart, switch "
     "the Tracer to 'Centerline (medial axis)' (it has no linking step, so a web costs it nothing), "
-    "or check the image's upper normalisation bound -- a web like this is usually a SATURATED tile "
+    "or check the image's upper normalization bound -- a web like this is usually a SATURATED tile "
     "whose blown-out collagen edges have fused into one network."
 )
 
@@ -2034,7 +1930,7 @@ def _fire_params_for_smoothing(fire_params_value):
     The dialog's mask keeps pixels whose blurred, rounded value is above ``thresh_im2``. FIRE keeps
     ``round(weight * blurred) > thresh_im2``, so at Smoothing 1 a threshold of 77 acted like 191 and
     above about 1.4 nothing passed (0 fibers). Sending ``round(weight * (thresh_im2 + 0.5) + 0.5) - 1``
-    makes FIRE keep the same pixels, to within one dimmed grey level (``1 / weight`` levels of the
+    makes FIRE keep the same pixels, to within one dimmed gray level (``1 / weight`` levels of the
     original). CT-FIRE itself is left as published. Only applies with Smoothing above 0 and an
     absolute threshold; a relative ``thresh_im`` is unaffected by the dimming.
     """
@@ -2083,15 +1979,18 @@ def _fire_smooth_dims():
     return _SMOOTH_DIMS
 
 
-def _run_fire(fire_params_value, ll1, image):
+def _run_fire(fire_params_value, ll1, image, raw_mode=False):
     """Run FIRE, isolated in a worker subprocess when possible.
 
     A hard crash (segfault) or hang is contained: the worker dies, the server
     survives, and a clear error is raised. Normal analysis exceptions (e.g. a
     catchable MemoryError / bad_alloc) propagate to the caller unchanged.
+    In raw mode FIRE gets the parameters exactly as sent, without the Smoothing
+    threshold compensation.
     """
     global _USE_WORKER
-    fire_params_value = _fire_params_for_smoothing(fire_params_value)
+    if not raw_mode:
+        fire_params_value = _fire_params_for_smoothing(fire_params_value)
     if not (_USE_WORKER and _REPO_ROOT is not None):
         return _inprocess_fire(fire_params_value, ll1, image)
 
@@ -2455,7 +2354,7 @@ def trace_flow(image, mask, parallel_px=17.0, coh_min=0.05, step=1.5, max_len=12
             "points": pl, "length_arc": arc, "length_end": end, "angle": ang,
             "straightness": straight,
             "center": [float(pts[len(pts) // 2, 0]), float(pts[len(pts) // 2, 1])],
-            **_width_fields(wid),
+            **width_fields(wid),
         })
     for i, f in enumerate(out):
         f["id"] = i
@@ -2619,7 +2518,7 @@ def trace_centerlines(gray, thr, smooth_sigma=2.0, min_len_px=20.0, min_obj=60,
         fibers.append({
             "id": len(fibers), "points": pts_xy, "center": [mid[0], mid[1]], "angle": ang,
             "length_arc": arc, "length_end": end, "straightness": straight,
-            **_width_fields(wv), "tacs": None,
+            **width_fields(wv), "tacs": None,
         })
     return fibers
 
@@ -2699,7 +2598,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
         # (PIL 'I;16' -> uint16, 0-65535), the 0-255 thresh_im2 below would pass ~every pixel ->
         # 100% foreground -> density-guard exhaustion / crash. Normalise instead of melting down.
         logger.warning("prescaled tile arrived with values up to %.0f (expected 0-255) -- the client "
-                       "should send 8-bit; normalising defensively.", float(imn.max()))
+                       "should send 8-bit; normalizing defensively.", float(imn.max()))
         imn = imn / imn.max() * 255.0
     # Optional grayscale ridge/vesselness pre-filter (experimental). When enabled it
     # replaces the intensity image with a 0-255 "fiberness" map BEFORE thresholding, so
@@ -2715,7 +2614,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
         new_thr = _ridge_threshold(imn)
         fire_p = dict(fire_p)
         fire_p["thresh_im2"] = new_thr
-        logger.info("Ridge mode: overrode thresh_im2 %s -> %d (Otsu on the fibre-ness map).",
+        logger.info("Ridge mode: overrode thresh_im2 %s -> %d (Otsu on the fiber-ness map).",
                     old_thr, new_thr)
     # EXCLUSION MASK ("don't trace here"). Validate the shape once, here, so every use below can
     # trust it. RAW mode is a promise of an unmanipulated plain-Python run, so the mask is ignored
@@ -2730,7 +2629,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
                            exclude.shape, imn.shape)
         else:
             excl = exclude.astype(bool)
-            logger.info("Exclusion mask: %.1f%% of the tile is excluded from fibre tracing.",
+            logger.info("Exclusion mask: %.1f%% of the tile is excluded from fiber tracing.",
                         100.0 * excl.mean())
 
     # Optional HARD ERASE: remove the excluded pixels from the image BEFORE thresholding, so they
@@ -2741,7 +2640,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
     if excl is not None and _cfg(meta, "exclude_erase", "TMEQUANT_EXCLUDE_ERASE", 0.0) > 0:
         imn = imn.copy()
         imn[excl] = 0.0
-        logger.info("Exclusion mask: ERASED from the image before tracing (hard mode) -- fibres "
+        logger.info("Exclusion mask: ERASED from the image before tracing (hard mode) -- fibers "
                     "crossing an excluded object will be cut.")
 
     thr = fire_p.get("thresh_im2", 5) or 5
@@ -2801,14 +2700,14 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
             smooth_sigma=_cfg(meta, "cl_smooth", "TMEQUANT_CL_SMOOTH", 2.0),
             min_len_px=max(1.0, ll1),
             link_turn_deg=_cfg(meta, "cl_link_turn", "TMEQUANT_CL_LINK_TURN", 60.0))
-        logger.info("Centerline tracer: %d fibre(s) from the medial axis (threshold %.0f).",
+        logger.info("Centerline tracer: %d fiber(s) from the medial axis (threshold %.0f).",
                     len(cl_fibers), thr_used)
     elif use_flow:
         cl_fibers = trace_flow(
             imn, imn > thr_used,
             parallel_px=_cfg(meta, "flow_parallel_px", "TMEQUANT_FLOW_PARALLEL", 17.0),
             min_len_px=max(1.0, ll1))
-        logger.info("Flow tracer: %d fibre(s) from the orientation field (threshold %.0f, "
+        logger.info("Flow tracer: %d fiber(s) from the orientation field (threshold %.0f, "
                     "parallel spacing %.0f px).", len(cl_fibers), thr_used,
                     _cfg(meta, "flow_parallel_px", "TMEQUANT_FLOW_PARALLEL", 17.0))
 
@@ -2879,7 +2778,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
                     "Giant-web guard: the collagen formed ONE connected network of %d skeleton px "
                     "(cap %d) -- raised threshold %.0f -> %.0f to break it into %d px BEFORE "
                     "tracing, which would otherwise have run until the %.0fs timeout for no "
-                    "fibres. %s",
+                    "fibers. %s",
                     web_before, int(WEB_CAP), thr_before, thr_used, web_px,
                     _cfg(meta, "fire_timeout", "TMEQUANT_FIRE_TIMEOUT", 180), _WEB_HINT)
             else:
@@ -2919,13 +2818,13 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
     max_attempts = 4
     for attempt in (() if (use_centerline or use_flow) else range(max_attempts)):
         try:
-            fibers = _run_fire(fire_p, ll1, imn)
+            fibers = _run_fire(fire_p, ll1, imn, raw_mode=raw_mode)
             break
         except Exception as exc:  # noqa: BLE001
             if raw_mode:
                 # RAW mode: no param easing, no retry. A crash/OOM/timeout just yields an empty
                 # tile (as the user requested), logged (with traceback) so the cause is visible.
-                logger.warning("RAW mode: FIRE failed on this tile -- returning no fibres (%s).", exc)
+                logger.warning("RAW mode: FIRE failed on this tile -- returning no fibers (%s).", exc)
                 logger.debug("RAW-mode tile failure traceback:\n%s", traceback.format_exc())
                 fibers = []
                 break
@@ -2978,7 +2877,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
         fibers = _snap_to_centerline(
             fibers, imn, float(fire_p.get("thresh_im2", thr_used) or thr_used),
             search_px=_cfg(meta, "snap_search_px", "TMEQUANT_SNAP_SEARCH", 6.0))
-        logger.info("Centreline snap: refined %d FIRE trace(s) onto the collagen medial axis.", len(fibers))
+        logger.info("Centerline snap: refined %d FIRE trace(s) onto the collagen medial axis.", len(fibers))
 
     if fibers and not raw_mode:
         before_split = len(fibers)
@@ -2988,7 +2887,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
             jump_mult=_cfg(meta, "split_jump_mult", "TMEQUANT_SPLIT_JUMP_MULT", 4.0),
             valley_frac=_cfg(meta, "split_valley_frac", "TMEQUANT_SPLIT_VALLEY_FRAC", 0.55))
         if len(fibers) != before_split:
-            logger.info("Bridge split: %d -> %d fibres (cut cross-gap links).",
+            logger.info("Bridge split: %d -> %d fibers (cut cross-gap links).",
                         before_split, len(fibers))
 
     # Coordinates are already in the real-image frame (the real tile sat at the
@@ -3008,7 +2907,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
         before_pad = len(fibers)
         fibers = [f for f in fibers if _all_in_bounds(f)]
         if len(fibers) != before_pad:
-            logger.info("Pad filter: dropped %d fibre(s) reaching into the square-pad margin.",
+            logger.info("Pad filter: dropped %d fiber(s) reaching into the square-pad margin.",
                         before_pad - len(fibers))
 
     # Trim tile-EDGE artifacts. Where collagen is truncated by the tile boundary, FIRE's distance
@@ -3020,7 +2919,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
         fibers = _trim_edge_tails(fibers, orig_w, orig_h,
                                   margin=_cfg(meta, "edge_trim_margin", "TMEQUANT_EDGE_MARGIN", 3.0))
         if len(fibers) != before_edge:
-            logger.info("Edge filter: dropped %d fibre(s) left too short after trimming edge caps.",
+            logger.info("Edge filter: dropped %d fiber(s) left too short after trimming edge caps.",
                         before_edge - len(fibers))
 
     # Apply the exclusion mask to the traced geometry (drop fibres that ARE the excluded object,
@@ -3034,7 +2933,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
             trim=_cfg(meta, "exclude_trim", "TMEQUANT_EXCLUDE_TRIM", 1.0) > 0,
             min_len=ll1)
         if n_ex_drop or n_ex_trim:
-            logger.info("Exclusion mask: dropped %d fibre(s) >=%.0f%% inside an excluded region, "
+            logger.info("Exclusion mask: dropped %d fiber(s) >=%.0f%% inside an excluded region, "
                         "trimmed %d more back to real collagen.",
                         n_ex_drop, max_frac * 100.0, n_ex_trim)
 
@@ -3053,7 +2952,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
                 coh_strong=_cfg(meta, "flow_coh", "TMEQUANT_FLOW_COH", 0.55),
                 off_deg=flow_off)
             if len(fibers) != before_flow:
-                logger.info("Flow filter: removed %d fibre(s) running across the local flow.",
+                logger.info("Flow filter: removed %d fiber(s) running across the local flow.",
                             before_flow - len(fibers))
 
     # OPTIONAL anti-flow check. Reports (and only removes if asked) fibres that run against an
@@ -3065,7 +2964,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
             for f, sc in zip(fibers, scores):
                 f["anti_flow_deg"] = sc
             bad = sum(1 for sc in scores if sc == sc and sc > 40.0)
-            logger.info("Anti-flow check: %d of %d fibre(s) run >40 deg against the independent "
+            logger.info("Anti-flow check: %d of %d fiber(s) run >40 deg against the independent "
                         "flow estimate (scored, not removed unless a limit is set).",
                         bad, len(fibers))
             lim = _cfg(meta, "anti_flow_max_deg", "TMEQUANT_ANTI_FLOW_MAX", 0.0)
@@ -3075,7 +2974,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
                           if not (f.get("anti_flow_deg") == f.get("anti_flow_deg")
                                   and f.get("anti_flow_deg", 0.0) > lim)]
                 if len(fibers) != before:
-                    logger.info("Anti-flow check: removed %d fibre(s) over %.0f deg.",
+                    logger.info("Anti-flow check: removed %d fiber(s) over %.0f deg.",
                                 before - len(fibers), lim)
         except Exception as exc:  # noqa: BLE001 - a self-check must never fail the tile
             logger.warning("Anti-flow check skipped: %s", exc)
@@ -3089,7 +2988,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
             min_sep=_cfg(meta, "retrace_sep", "TMEQUANT_RETRACE_SEP", 8.0),
             lag_px=_cfg(meta, "retrace_lag", "TMEQUANT_RETRACE_LAG", 30.0))
         if n_retrace:
-            logger.info("Doubling-back filter: cut %d fibre(s) that retraced their own path "
+            logger.info("Doubling-back filter: cut %d fiber(s) that retraced their own path "
                         "(kept the longer arm).", n_retrace)
 
     # Remove duplicate traces that follow the same bundle (same tile or not): a fibre whose path lies
@@ -3101,7 +3000,7 @@ def analyze_real(image: np.ndarray, meta: dict, mask=None, stats_out=None, exclu
             tol_px=_cfg(meta, "dedup_path_tol", "TMEQUANT_DEDUP_PATH_TOL", 6.0),
             overlap_frac=_cfg(meta, "dedup_overlap", "TMEQUANT_DEDUP_OVERLAP", 0.7))
         if len(fibers) != before_dup:
-            logger.info("Duplicate-path filter: removed %d fibre(s) retracing a longer fibre.",
+            logger.info("Duplicate-path filter: removed %d fiber(s) retracing a longer fiber.",
                         before_dup - len(fibers))
 
     n_traced = len(fibers)
